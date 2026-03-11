@@ -1421,40 +1421,44 @@ ADMIN_MENU_BUTTONS = {
 
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id if update.effective_user else None
-    print(f"👤 관리자 명령어 수신! (ID: {user_id})")
+    try:
+        print(f"DEBUG: 어드민 명령어 수신! (받은 ID: {update.effective_user.id}, 설정된 ADMIN_ID: {ADMIN_ID})")
+        user_id = update.effective_user.id if update.effective_user else None
 
-    if not is_admin(user_id):
-        await update.message.reply_text("권한이 없습니다.")
-        return
+        if not is_admin(user_id):
+            await update.message.reply_text(f"권한이 없습니다(ID: {user_id})")
+            return
 
-    keyboard = InlineKeyboardMarkup(
-        [
+        keyboard = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton(
-                    "🔍 타겟 그룹 찾기",
-                    callback_data=ADMIN_MENU_BUTTONS["find_groups"],
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "👥 유저 아이디 수집",
-                    callback_data=ADMIN_MENU_BUTTONS["scrape_members"],
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📊 수집 현황 확인",
-                    callback_data=ADMIN_MENU_BUTTONS["show_stats"],
-                )
-            ],
-        ]
-    )
+                [
+                    InlineKeyboardButton(
+                        "🔍 타겟 그룹 찾기",
+                        callback_data=ADMIN_MENU_BUTTONS["find_groups"],
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "👥 유저 아이디 수집",
+                        callback_data=ADMIN_MENU_BUTTONS["scrape_members"],
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "📊 수집 현황 확인",
+                        callback_data=ADMIN_MENU_BUTTONS["show_stats"],
+                    )
+                ],
+            ]
+        )
 
-    await update.message.reply_text(
-        "관리자 제어 패널입니다.\n원하시는 작업을 선택하세요.",
-        reply_markup=keyboard,
-    )
+        await update.message.reply_text(
+            "관리자 제어 패널입니다.\n원하시는 작업을 선택하세요.",
+            reply_markup=keyboard,
+        )
+    except Exception as e:
+        print(f"DEBUG: 에러 발생! {e}")
+        raise
 
 
 async def _handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
