@@ -73,6 +73,15 @@ ENTRY_EVENT_COLUMNS = {
     "received_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+PROMO_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "source": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "bonus_percent": "INTEGER NOT NULL DEFAULT 0",
+    "raw_snippet": "TEXT NOT NULL DEFAULT ''",
+    "scraped_at": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def _connect():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -172,6 +181,21 @@ def ensure_db() -> None:
     for column_name, column_type in ENTRY_EVENT_COLUMNS.items():
         if column_name not in existing_entry_events:
             cur.execute(f"ALTER TABLE entry_events ADD COLUMN {column_name} {column_type}")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS promotions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT
+        )
+        """
+    )
+
+    cur.execute("PRAGMA table_info(promotions)")
+    existing_promos = {row[1] for row in cur.fetchall()}
+
+    for column_name, column_type in PROMO_COLUMNS.items():
+        if column_name not in existing_promos:
+            cur.execute(f"ALTER TABLE promotions ADD COLUMN {column_name} {column_type}")
 
     conn.commit()
     conn.close()
@@ -750,3 +774,34 @@ def save_entry_event(event_id: str, telegram_user_id: int) -> None:
     )
     conn.commit()
     conn.close()
+
+
+def save_promotion(
+    source: str,
+    title: str,
+    bonus_percent: int = 0,
+    raw_snippet: str = "",
+) -> int:
+    conn = _connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO promotions (
+            source, title, bonus_percent, raw_snippet, scraped_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            source,
+            title,
+            int(bonus_percent or 0),
+            raw_snippet,
+            datetime.utcnow().isoformat(),
+        ),
+    )
+
+    promo_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return promo_id
