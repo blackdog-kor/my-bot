@@ -896,6 +896,15 @@ def save_competitor_user(
     return row_id
 
 
+def count_competitor_users() -> int:
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM competitor_users")
+    count = cur.fetchone()[0]
+    conn.close()
+    return int(count)
+
+
 def save_promotion(
     source: str,
     title: str,

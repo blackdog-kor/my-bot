@@ -7,3 +7,4 @@ sentry-sdk==2.23.1
 python-dotenv
 scrapling
 telethon
+httpx

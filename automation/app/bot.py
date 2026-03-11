@@ -48,6 +48,9 @@ from app.publishers.telegram_pub import (
     scheduled_publish_telegram,
     publish_to_telegram_channel,
 )
+from app.services.link_finder import find_competitor_telegram_links
+from app.services.member_scraper import run_member_scraper
+from app.db import count_competitor_users
 
 ai_service = AIService()
 pipeline_service = PipelineService()
@@ -1407,6 +1410,117 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
+ADMIN_MENU_BUTTONS = {
+    "find_groups": "find_groups",
+    "scrape_members": "scrape_members",
+    "show_stats": "show_stats",
+}
+
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("권한이 없습니다.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔍 타겟 그룹 찾기",
+                    callback_data=ADMIN_MENU_BUTTONS["find_groups"],
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "👥 유저 아이디 수집",
+                    callback_data=ADMIN_MENU_BUTTONS["scrape_members"],
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📊 수집 현황 확인",
+                    callback_data=ADMIN_MENU_BUTTONS["show_stats"],
+                )
+            ],
+        ]
+    )
+
+    await update.message.reply_text(
+        "관리자 제어 패널입니다.\n원하시는 작업을 선택하세요.",
+        reply_markup=keyboard,
+    )
+
+
+async def _handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return
+
+    if not is_admin(update.effective_user.id):
+        await query.answer("권한이 없습니다.", show_alert=True)
+        return
+
+    data = query.data or ""
+
+    if data == ADMIN_MENU_BUTTONS["find_groups"]:
+        await query.answer()
+        await query.edit_message_text("🔍 구글에서 경쟁사 텔레그램 그룹을 탐색 중입니다...")
+
+        # Stealth Scrapling 기반 링크 탐색은 동기 함수이므로, 별도 스레드로 실행
+        loop = context.application.loop
+
+        async def run_in_thread():
+            from functools import partial
+            from asyncio import to_thread
+
+            count = 0
+
+            def _work():
+                nonlocal count
+                links = find_competitor_telegram_links()
+                count = len(links)
+
+            await to_thread(_work)
+            await context.bot.send_message(
+                chat_id=update.effective_user.id,
+                text=f"✅ 타겟 그룹 탐색 완료\n발견된 텔레그램 링크: {count}개",
+            )
+
+        loop.create_task(run_in_thread())
+        return
+
+    if data == ADMIN_MENU_BUTTONS["scrape_members"]:
+        await query.answer()
+        await query.edit_message_text("👥 경쟁사 그룹 멤버 수집을 시작합니다...")
+
+        loop = context.application.loop
+
+        async def run_members():
+            from asyncio import to_thread
+
+            # Telethon 진입점은 run_member_scraper (동기 wrapper) 사용
+            await to_thread(run_member_scraper)
+            total = count_competitor_users()
+            await context.bot.send_message(
+                chat_id=update.effective_user.id,
+                text=(
+                    "✅ 멤버 수집 작업이 완료되었습니다.\n"
+                    f"현재 competitor_users 테이블 유저 수: {total}명"
+                ),
+            )
+
+        loop.create_task(run_members())
+        return
+
+    if data == ADMIN_MENU_BUTTONS["show_stats"]:
+        await query.answer()
+        total = count_competitor_users()
+        await query.edit_message_text(
+            f"📊 현재 competitor_users 에 저장된 유저 수: {total}명"
+        )
+        return
+
+
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -1474,6 +1588,7 @@ async def telegram_error_handler(update: object, context: ContextTypes.DEFAULT_T
 def get_handlers():
     return [
         CommandHandler("start", start_command),
+        CommandHandler("admin", admin_command),
         CommandHandler("newpost", newpost_command),
         CommandHandler("list", list_command),
         CommandHandler("showpost", showpost_command),
@@ -1506,5 +1621,6 @@ def get_handlers():
         CommandHandler("ideas", ideas_command),
         CommandHandler("users", users_command),
         CommandHandler("dev", dev_command),
+        CallbackQueryHandler(_handle_admin_callback),
         MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler),
     ]

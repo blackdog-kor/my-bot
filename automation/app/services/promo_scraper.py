@@ -6,7 +6,7 @@ from scrapling.fetchers import StealthyFetcher
 from app.db import save_promotion
 
 
-PERCENT_RE = re.compile(r"(\\d{1,3})\\s*%")
+PERCENT_RE = re.compile(r"(\d{1,3})\s*%")
 
 
 COMPETITOR_SITES = [
@@ -21,7 +21,7 @@ COMPETITOR_SITES = [
 ]
 
 
-def _extract_bonus percents_from_text(text: str) -> list[int]:
+def _extract_bonus_percents_from_text(text: str) -> list[int]:
     return [int(m.group(1)) for m in PERCENT_RE.finditer(text)]
 
 
@@ -52,11 +52,11 @@ def scrape_competitor_promos() -> None:
         )
 
         full_text = page.text or ""
-        global_bonuses = _extract_bonus percents_from_text(full_text)
+        global_bonuses = _extract_bonus_percents_from_text(full_text)
         global_top_bonus = max(global_bonuses) if global_bonuses else 0
 
         for title in _extract_titles(page):
-            bonuses = _extract_bonus percents_from_text(title) or global_bonuses
+            bonuses = _extract_bonus_percents_from_text(title) or global_bonuses
             bonus = max(bonuses) if bonuses else global_top_bonus
 
             snippet = title
