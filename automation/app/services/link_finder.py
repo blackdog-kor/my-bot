@@ -49,6 +49,7 @@ def _extract_telegram_links(page, brand_query: str) -> Iterable[TelegramLink]:
             continue
         seen.add(href)
 
+        print(f"[link_finder]   텔레그램 링크 발견: {href} (텍스트: {text})")
         yield TelegramLink(brand_query=brand_query, url=href, text=text)
 
 
@@ -60,18 +61,23 @@ def find_telegram_links_for_query(query: str, max_results: int = 50) -> List[Tel
     StealthyFetcher.adaptive = True
 
     url = f"{GOOGLE_SEARCH_URL}?q={query.replace(' ', '+')}&hl=en"
+    print(f"[link_finder] 쿼리 시작: {query}")
+    print(f"[link_finder]   구글 접속 URL: {url}")
 
     page = StealthyFetcher.fetch(
         url,
         headless=True,
         network_idle=True,
     )
+    print(f"[link_finder]   구글 검색 페이지 로딩 완료: {query}")
 
     links: List[TelegramLink] = []
     for link in _extract_telegram_links(page, brand_query=query):
         links.append(link)
         if len(links) >= max_results:
             break
+
+    print(f"[link_finder]   {query} 에서 발견된 텔레그램 링크 수: {len(links)}")
 
     return links
 
@@ -85,12 +91,15 @@ def find_competitor_telegram_links(max_results_per_query: int = 50) -> List[Tele
     seen_urls: Set[str] = set()
 
     for q in TARGET_BRANDS:
+        print(f"[link_finder] ====== 브랜드 쿼리 처리 시작: {q} ======")
         links = find_telegram_links_for_query(q, max_results=max_results_per_query)
         for link in links:
             if link.url in seen_urls:
                 continue
             seen_urls.add(link.url)
             all_links.append(link)
+
+        print(f"[link_finder] ====== 브랜드 쿼리 종료: {q}, 누적 고유 링크 수: {len(all_links)} ======")
 
     return all_links
 

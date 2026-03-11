@@ -49,12 +49,16 @@ async def _scrape_group_members_for_link(
     주어진 텔레그램 링크(그룹/채널)에 접속해 멤버 정보를 수집합니다.
     """
     try:
+        print(f"[member_scraper]   그룹 엔티티 조회 시도: {link.url}")
         entity = await client.get_entity(link.url)
     except RPCError as e:
         # 접근 권한 문제, 삭제된 그룹 등은 조용히 스킵
         print(f"[member_scraper] skip {link.url}: {e}")
         return
 
+    print(f"[member_scraper]   참가자 목록 조회 시작: {link.url}")
+
+    count = 0
     async for user in client.iter_participants(entity):
         if not isinstance(user, User):
             continue
@@ -75,19 +79,27 @@ async def _scrape_group_members_for_link(
         if per_user_delay > 0:
             await asyncio.sleep(per_user_delay)
 
+        count += 1
+
+    print(f"[member_scraper]   참가자 목록 조회 완료: {link.url}, 수집 인원: {count}")
+
 
 async def _scrape_all_members(
     per_group_delay: float = 3.0,
     per_user_delay: float = 0.1,
 ) -> None:
     _ensure_telegram_config()
+    print("[member_scraper] 설정 확인 완료. TG_API_ID/TG_API_HASH 로 세션을 엽니다.")
     print("🔍 구글에서 경쟁사 그룹 주소를 찾는 중입니다... 잠시만 기다려주세요.")
     links: Iterable[TelegramLink] = find_competitor_telegram_links()
+    print(f"[member_scraper] 구글 검색에서 총 {len(list(links))}개 링크를 발견 (실제 순회 시작).")
 
     client = TelegramClient(TG_SESSION_NAME, TG_API_ID, TG_API_HASH)
+    print(f"[member_scraper] Telethon 클라이언트 세션 생성: {TG_SESSION_NAME}.session")
     async with client:
+        print("[member_scraper] Telethon 세션 접속 완료. 그룹 순회를 시작합니다.")
         for link in links:
-            print(f"[member_scraper] scraping members from {link.url} ({link.brand_query})")
+            print(f"[member_scraper] >>> 그룹 멤버 수집 시작: {link.url} ({link.brand_query})")
             await _scrape_group_members_for_link(
                 client,
                 link,
@@ -96,7 +108,10 @@ async def _scrape_all_members(
 
             # 그룹/채널 사이에는 더 긴 지연을 넣어 차단 위험을 줄입니다.
             if per_group_delay > 0:
+                print(f"[member_scraper]   그룹 간 지연: {per_group_delay}초 대기")
                 time.sleep(per_group_delay)
+
+    print("[member_scraper] 모든 그룹에 대한 멤버 수집이 완료되었습니다.")
 
 
 def run_member_scraper() -> None:
