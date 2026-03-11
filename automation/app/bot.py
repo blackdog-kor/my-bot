@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     ContextTypes,
