@@ -66,4 +66,5 @@ def scrape_competitor_promos() -> None:
                 bonus_percent=bonus,
                 raw_snippet=snippet,
             )
+        
 

@@ -82,6 +82,15 @@ PROMO_COLUMNS = {
     "scraped_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+SITE_DATA_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "url": "TEXT NOT NULL DEFAULT ''",
+    "source": "TEXT NOT NULL DEFAULT ''",
+    "markdown": "TEXT NOT NULL DEFAULT ''",
+    "meta_json": "TEXT NOT NULL DEFAULT '{}'",
+    "scraped_at": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def _connect():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -196,6 +205,21 @@ def ensure_db() -> None:
     for column_name, column_type in PROMO_COLUMNS.items():
         if column_name not in existing_promos:
             cur.execute(f"ALTER TABLE promotions ADD COLUMN {column_name} {column_type}")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT
+        )
+        """
+    )
+
+    cur.execute("PRAGMA table_info(site_data)")
+    existing_site_data = {row[1] for row in cur.fetchall()}
+
+    for column_name, column_type in SITE_DATA_COLUMNS.items():
+        if column_name not in existing_site_data:
+            cur.execute(f"ALTER TABLE site_data ADD COLUMN {column_name} {column_type}")
 
     conn.commit()
     conn.close()
@@ -774,6 +798,40 @@ def save_entry_event(event_id: str, telegram_user_id: int) -> None:
     )
     conn.commit()
     conn.close()
+
+
+def save_site_snapshot(
+    url: str,
+    markdown: str,
+    source: str = "",
+    meta: dict | None = None,
+) -> int:
+    """
+    Persist a raw site snapshot (Markdown) for later analysis.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO site_data (
+            url, source, markdown, meta_json, scraped_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            url,
+            source,
+            markdown,
+            json.dumps(meta or {}, ensure_ascii=False),
+            datetime.utcnow().isoformat(),
+        ),
+    )
+
+    site_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return site_id
 
 
 def save_promotion(
