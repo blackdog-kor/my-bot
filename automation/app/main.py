@@ -43,6 +43,18 @@ _telegram_bot_ref = None
 _main_loop_ref = None
 
 
+async def _install_playwright_chromium_in_background() -> None:
+    """Playwright용 Chromium을 백그라운드에서 설치한다. 실패해도 서버는 죽지 않는다."""
+    try:
+        logger.info("Playwright Chromium 설치를 백그라운드에서 시작합니다.")
+        # CPU 바운드/IO 작업을 메인 이벤트 루프와 분리
+        await asyncio.to_thread(os.system, "python -m playwright install chromium")
+        logger.info("Playwright Chromium 설치가 완료되었습니다.")
+    except Exception:
+        # 여기서 예외를 다시 올리지 않는다. 서버 기동을 막지 않기 위함.
+        logger.exception("Playwright Chromium 설치 중 오류가 발생했습니다.")
+
+
 def _daily_member_scrape_and_report() -> None:
     """매일 새벽 4시에 실행: 멤버 수집 후 ADMIN_ID로 보고서 전송."""
     global _telegram_bot_ref, _main_loop_ref
@@ -205,6 +217,13 @@ async def lifespan(app: FastAPI):
             logger.info("Webhook already correct")
 
         logger.info("Webhook URL: %s", CURRENT_WEBHOOK_URL)
+
+    # Playwright Chromium 설치를 백그라운드 태스크로 실행 (서버 기동은 먼저 완료)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_install_playwright_chromium_in_background())
+    except Exception:
+        logger.exception("Playwright Chromium 백그라운드 설치 태스크 등록 실패")
 
     logger.info("🚀 서버가 성공적으로 시작되었습니다!")
 
