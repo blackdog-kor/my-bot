@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from fastapi import FastAPI, Request, HTTPException
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import Application
 
 from app.config import ADMIN_ID, BOT_TOKEN, CHANNEL_ID
@@ -173,6 +173,10 @@ async def lifespan(app: FastAPI):
 
     await telegram_app.initialize()
     await telegram_app.start()
+
+    await telegram_app.bot.set_my_commands(
+        [BotCommand("admin", "관리자 메뉴")]
+    )
 
     _telegram_bot_ref = telegram_app.bot
     _main_loop_ref = asyncio.get_running_loop()
