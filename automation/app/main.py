@@ -162,7 +162,7 @@ async def lifespan(app: FastAPI):
     ensure_db()
 
     if not BOT_TOKEN:
-        print("BOT_TOKEN is not set. Telegram features disabled.")
+        logger.warning("BOT_TOKEN is not set. Telegram features disabled.")
         telegram_app = None
         CURRENT_WEBHOOK_URL = ""
         yield
@@ -193,18 +193,20 @@ async def lifespan(app: FastAPI):
     )
 
     if not PUBLIC_BASE_URL or not WEBHOOK_SECRET:
-        print("PUBLIC_BASE_URL or WEBHOOK_SECRET is not set. Webhook auto-heal disabled.")
+        logger.warning("PUBLIC_BASE_URL or WEBHOOK_SECRET is not set. Webhook auto-heal disabled.")
         CURRENT_WEBHOOK_URL = ""
     else:
         CURRENT_WEBHOOK_URL = f"{PUBLIC_BASE_URL}/telegram/{WEBHOOK_SECRET}"
         status = await ensure_webhook()
 
         if status["healed"]:
-            print("Webhook set")
+            logger.info("Webhook set")
         else:
-            print("Webhook already correct")
+            logger.info("Webhook already correct")
 
-        print(f"Webhook URL: {CURRENT_WEBHOOK_URL}")
+        logger.info("Webhook URL: %s", CURRENT_WEBHOOK_URL)
+
+    logger.info("🚀 서버가 성공적으로 시작되었습니다!")
 
     yield
 
@@ -251,6 +253,7 @@ async def telegram_webhook(secret: str, request: Request):
         raise HTTPException(status_code=503, detail="telegram app not ready")
 
     data = await request.json()
+    logger.warning("🔔 메시지 수신 성공!")
     logger.warning("[telegram_webhook] incoming update JSON: %s", data)
     update = Update.de_json(data, telegram_app.bot)
     logger.warning(
@@ -261,7 +264,7 @@ async def telegram_webhook(secret: str, request: Request):
     try:
         await telegram_app.update_queue.put(update)
     except Exception as e:
-        logger.error("ERROR while enqueueing update: %r", e)
+        logger.exception("ERROR while enqueueing update")
         capture_exception(
             e,
             tags={"component": "telegram-webhook"},
