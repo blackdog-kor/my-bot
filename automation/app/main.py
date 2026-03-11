@@ -248,16 +248,18 @@ async def telegram_webhook(secret: str, request: Request):
         raise HTTPException(status_code=503, detail="telegram app not ready")
 
     data = await request.json()
-    print(f"[telegram_webhook] incoming update JSON: {data}")
+    print(f"[telegram_webhook] incoming update JSON: {data}", flush=True)
     update = Update.de_json(data, telegram_app.bot)
     print(
         "[telegram_webhook] enqueue update:",
         getattr(update.effective_user, "id", None),
         getattr(getattr(update, "message", None), "text", None),
+        flush=True,
     )
     try:
         await telegram_app.update_queue.put(update)
     except Exception as e:
+        print(f"[telegram_webhook] ERROR while enqueueing update: {e!r}", flush=True)
         capture_exception(
             e,
             tags={"component": "telegram-webhook"},
