@@ -4,9 +4,10 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import urlencode, urlparse
 
 from telegram import (
     InlineKeyboardButton,
@@ -17,16 +18,20 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
-from utils.logger import setup_logger, log_event
-from utils.sns_client import send_user_entry_event
+# Ensure src/ is on sys.path so that 'utils.*' can be imported
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SRC_DIR = ROOT_DIR / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-logger = setup_logger("handlers")
+from utils.sns_client import send_user_entry_event  # type: ignore
+
+logger = logging.getLogger("handlers")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT_DIR / "config" / "content.json"
 DATA_DIR = ROOT_DIR / "data"
 DB_PATH = DATA_DIR / "users.db"
@@ -104,6 +109,14 @@ def save_user(user_id: int, username: str | None, language: str) -> None:
         )
 
     DB.commit()
+
+
+def log_event(logger: logging.Logger, event: str, **fields) -> None:
+    payload = {"event": event, **fields}
+    try:
+        logger.info(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        logger.info("event=%s %s", event, fields)
 
 
 def utf16_len(text: str) -> int:
