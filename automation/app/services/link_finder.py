@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, List, Set
 
-from scrapling.fetchers import StealthyFetcher
+from scrapling.fetchers import AsyncStealthyFetcher
 
 
 GOOGLE_SEARCH_URL = "https://www.google.com/search"
@@ -53,18 +53,18 @@ def _extract_telegram_links(page, brand_query: str) -> Iterable[TelegramLink]:
         yield TelegramLink(brand_query=brand_query, url=href, text=text)
 
 
-def find_telegram_links_for_query(query: str, max_results: int = 50) -> List[TelegramLink]:
+async def find_telegram_links_for_query(query: str, max_results: int = 50) -> List[TelegramLink]:
     """
     하나의 검색 쿼리에 대해 구글 검색을 실행하고,
     해당 페이지에서 텔레그램(t.me) 링크를 수집합니다.
     """
-    StealthyFetcher.adaptive = True
+    AsyncStealthyFetcher.adaptive = True
 
     url = f"{GOOGLE_SEARCH_URL}?q={query.replace(' ', '+')}&hl=en"
     print(f"[link_finder] 쿼리 시작: {query}")
     print(f"[link_finder]   구글 접속 URL: {url}")
 
-    page = StealthyFetcher.fetch(
+    page = await AsyncStealthyFetcher.fetch(
         url,
         headless=True,
         network_idle=True,
@@ -82,7 +82,7 @@ def find_telegram_links_for_query(query: str, max_results: int = 50) -> List[Tel
     return links
 
 
-def find_competitor_telegram_links(max_results_per_query: int = 50) -> List[TelegramLink]:
+async def find_competitor_telegram_links(max_results_per_query: int = 50) -> List[TelegramLink]:
     """
     1win / Stake / BC.Game 관련 구글 검색을 순회하면서
     모든 텔레그램 그룹/채널 링크를 리스트업합니다.
@@ -92,7 +92,7 @@ def find_competitor_telegram_links(max_results_per_query: int = 50) -> List[Tele
 
     for q in TARGET_BRANDS:
         print(f"[link_finder] ====== 브랜드 쿼리 처리 시작: {q} ======")
-        links = find_telegram_links_for_query(q, max_results=max_results_per_query)
+        links = await find_telegram_links_for_query(q, max_results=max_results_per_query)
         for link in links:
             if link.url in seen_urls:
                 continue

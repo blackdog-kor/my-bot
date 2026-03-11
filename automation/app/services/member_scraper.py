@@ -5,6 +5,7 @@ import os
 import time
 from typing import Iterable
 
+from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.errors import RPCError
 from telethon.tl.types import User, UserStatusOffline, UserStatusOnline, UserStatusRecently
@@ -12,6 +13,9 @@ from telethon.tl.types import User, UserStatusOffline, UserStatusOnline, UserSta
 from app.db import save_competitor_user
 from app.services.link_finder import TelegramLink, find_competitor_telegram_links
 
+
+# automation/.env 에서 TG_API_ID, TG_API_HASH 등을 로드
+load_dotenv()
 
 TG_API_ID = int(os.getenv("TG_API_ID", "0") or 0)
 TG_API_HASH = os.getenv("TG_API_HASH", "").strip()
@@ -98,8 +102,7 @@ async def _scrape_all_members(
     print("[member_scraper] Telethon 세션 start() 완료. 구글 검색을 시작합니다.")
 
     print("🔍 구글에서 경쟁사 그룹 주소를 찾는 중입니다... 잠시만 기다려주세요.")
-    links_iter: Iterable[TelegramLink] = find_competitor_telegram_links()
-    links = list(links_iter)
+    links = await find_competitor_telegram_links()
     print(f"[member_scraper] 구글 검색에서 총 {len(links)}개 링크를 발견 (실제 순회 시작).")
 
     async with client:

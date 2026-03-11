@@ -1472,27 +1472,17 @@ async def _handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer()
         await query.edit_message_text("🔍 구글에서 경쟁사 텔레그램 그룹을 탐색 중입니다...")
 
-        # Stealth Scrapling 기반 링크 탐색은 동기 함수이므로, 별도 스레드로 실행
         loop = context.application.loop
 
-        async def run_in_thread():
-            from functools import partial
-            from asyncio import to_thread
-
-            count = 0
-
-            def _work():
-                nonlocal count
-                links = find_competitor_telegram_links()
-                count = len(links)
-
-            await to_thread(_work)
+        async def run_async():
+            links = await find_competitor_telegram_links()
+            count = len(links)
             await context.bot.send_message(
                 chat_id=update.effective_user.id,
                 text=f"✅ 타겟 그룹 탐색 완료\n발견된 텔레그램 링크: {count}개",
             )
 
-        loop.create_task(run_in_thread())
+        loop.create_task(run_async())
         return
 
     if data == ADMIN_MENU_BUTTONS["scrape_members"]:
