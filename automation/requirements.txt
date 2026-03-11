@@ -8,3 +8,5 @@ python-dotenv
 scrapling
 telethon
 httpx
+curl_cffi
+patchright
