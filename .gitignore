@@ -68,6 +68,11 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+# Telethon / session files
+.session
+*.session
+*.session-journal
+
 # Sphinx documentation
 docs/_build/
 
