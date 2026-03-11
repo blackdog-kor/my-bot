@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
@@ -7,7 +8,7 @@ from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import Application
 
-from app.config import BOT_TOKEN, CHANNEL_ID
+from app.config import ADMIN_ID, BOT_TOKEN, CHANNEL_ID
 from app.db import (
     ensure_db,
     get_video_job,
@@ -15,7 +16,10 @@ from app.db import (
     attach_media,
     attach_thumbnail,
     get_post,
+    count_competitor_users,
 )
+from app.services.member_scraper import run_member_scraper
+from app.services.scheduler_service import scheduler
 from app.bot import get_handlers, telegram_error_handler
 from app.publishers.telegram_pub import publish_to_telegram_channel
 from app.api.user_entry import router as user_entry_router
@@ -32,6 +36,35 @@ CALLBACK_SECRET = os.getenv("CALLBACK_SECRET", "")
 
 telegram_app: Application | None = None
 CURRENT_WEBHOOK_URL = ""
+_telegram_bot_ref = None
+_main_loop_ref = None
+
+
+def _daily_member_scrape_and_report() -> None:
+    """매일 새벽 4시에 실행: 멤버 수집 후 ADMIN_ID로 보고서 전송."""
+    global _telegram_bot_ref, _main_loop_ref
+    try:
+        before = count_competitor_users()
+        run_member_scraper()
+        after = count_competitor_users()
+        report = (
+            "📋 수집 완료 보고서\n"
+            f"이번 수집: {after - before}명\n"
+            f"현재 DB 총: {after}명"
+        )
+    except Exception as e:
+        report = f"❌ 수집 중 오류\n{e!s}"
+    bot = _telegram_bot_ref
+    loop = _main_loop_ref
+    if bot and loop and ADMIN_ID:
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                bot.send_message(chat_id=int(ADMIN_ID), text=report),
+                loop,
+            )
+            fut.result(timeout=15)
+        except Exception:
+            pass
 
 
 async def ensure_webhook() -> dict:
@@ -119,7 +152,7 @@ async def auto_publish_telegram_if_needed(post_id: int, payload_json: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global telegram_app, CURRENT_WEBHOOK_URL
+    global telegram_app, CURRENT_WEBHOOK_URL, _telegram_bot_ref, _main_loop_ref
 
     init_error_monitoring()
 
@@ -140,6 +173,17 @@ async def lifespan(app: FastAPI):
 
     await telegram_app.initialize()
     await telegram_app.start()
+
+    _telegram_bot_ref = telegram_app.bot
+    _main_loop_ref = asyncio.get_running_loop()
+    scheduler.add_job(
+        _daily_member_scrape_and_report,
+        "cron",
+        hour=4,
+        minute=0,
+        timezone="Asia/Seoul",
+        id="daily_member_scrape",
+    )
 
     if not PUBLIC_BASE_URL or not WEBHOOK_SECRET:
         print("PUBLIC_BASE_URL or WEBHOOK_SECRET is not set. Webhook auto-heal disabled.")
