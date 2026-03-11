@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -29,6 +30,8 @@ from app.services.error_monitoring import (
     capture_exception,
     build_telegram_update_context,
 )
+
+logger = logging.getLogger("uvicorn.error")
 
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
@@ -248,18 +251,17 @@ async def telegram_webhook(secret: str, request: Request):
         raise HTTPException(status_code=503, detail="telegram app not ready")
 
     data = await request.json()
-    print(f"[telegram_webhook] incoming update JSON: {data}", flush=True)
+    logger.warning("[telegram_webhook] incoming update JSON: %s", data)
     update = Update.de_json(data, telegram_app.bot)
-    print(
-        "[telegram_webhook] enqueue update:",
+    logger.warning(
+        "[telegram_webhook] enqueue update: user_id=%s text=%s",
         getattr(update.effective_user, "id", None),
         getattr(getattr(update, "message", None), "text", None),
-        flush=True,
     )
     try:
         await telegram_app.update_queue.put(update)
     except Exception as e:
-        print(f"[telegram_webhook] ERROR while enqueueing update: {e!r}", flush=True)
+        logger.error("ERROR while enqueueing update: %r", e)
         capture_exception(
             e,
             tags={"component": "telegram-webhook"},
