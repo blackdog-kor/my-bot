@@ -10,3 +10,4 @@ telethon
 httpx
 curl_cffi
 patchright
+playwright
