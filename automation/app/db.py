@@ -91,6 +91,16 @@ SITE_DATA_COLUMNS = {
     "scraped_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+COMPETITOR_USER_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "source": "TEXT NOT NULL DEFAULT ''",
+    "group_url": "TEXT NOT NULL DEFAULT ''",
+    "telegram_user_id": "INTEGER NOT NULL",
+    "username": "TEXT NOT NULL DEFAULT ''",
+    "last_seen": "TEXT NOT NULL DEFAULT ''",
+    "scraped_at": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def _connect():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -220,6 +230,21 @@ def ensure_db() -> None:
     for column_name, column_type in SITE_DATA_COLUMNS.items():
         if column_name not in existing_site_data:
             cur.execute(f"ALTER TABLE site_data ADD COLUMN {column_name} {column_type}")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS competitor_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT
+        )
+        """
+    )
+
+    cur.execute("PRAGMA table_info(competitor_users)")
+    existing_competitor_users = {row[1] for row in cur.fetchall()}
+
+    for column_name, column_type in COMPETITOR_USER_COLUMNS.items():
+        if column_name not in existing_competitor_users:
+            cur.execute(f"ALTER TABLE competitor_users ADD COLUMN {column_name} {column_type}")
 
     conn.commit()
     conn.close()
@@ -832,6 +857,43 @@ def save_site_snapshot(
     conn.commit()
     conn.close()
     return site_id
+
+
+def save_competitor_user(
+    source: str,
+    group_url: str,
+    telegram_user_id: int,
+    username: str,
+    last_seen: str = "",
+) -> int:
+    """
+    Save a single competitor user snapshot. We don't enforce uniqueness here,
+    so repeated runs will simply append more rows (time-series style).
+    """
+    conn = _connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO competitor_users (
+            source, group_url, telegram_user_id, username, last_seen, scraped_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            source,
+            group_url,
+            telegram_user_id,
+            username or "",
+            last_seen or "",
+            datetime.utcnow().isoformat(),
+        ),
+    )
+
+    row_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
 
 
 def save_promotion(

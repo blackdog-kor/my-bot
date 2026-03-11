@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+import asyncio
+import os
+import time
+from typing import Iterable
+
+from telethon import TelegramClient
+from telethon.errors import RPCError
+from telethon.tl.types import User, UserStatusOffline, UserStatusOnline, UserStatusRecently
+
+from app.db import save_competitor_user
+from app.services.link_finder import TelegramLink, find_competitor_telegram_links
+
+
+TG_API_ID = int(os.getenv("TG_API_ID", "0") or 0)
+TG_API_HASH = os.getenv("TG_API_HASH", "").strip()
+TG_SESSION_NAME = os.getenv("TG_SESSION_NAME", "competitor-member-scraper")
+
+
+class TelegramConfigError(RuntimeError):
+    pass
+
+
+def _ensure_telegram_config() -> None:
+    if not TG_API_ID or not TG_API_HASH:
+        raise TelegramConfigError(
+            "TG_API_ID and TG_API_HASH must be set in the environment to run member_scraper."
+        )
+
+
+def _status_to_str(status) -> str:
+    if isinstance(status, UserStatusOnline):
+        return "online"
+    if isinstance(status, UserStatusRecently):
+        return "recently"
+    if isinstance(status, UserStatusOffline):
+        # has .was_online datetime
+        return f"offline:{getattr(status, 'was_online', '')}"
+    return str(status or "")
+
+
+async def _scrape_group_members_for_link(
+    client: TelegramClient,
+    link: TelegramLink,
+    per_user_delay: float = 0.1,
+) -> None:
+    """
+    주어진 텔레그램 링크(그룹/채널)에 접속해 멤버 정보를 수집합니다.
+    """
+    try:
+        entity = await client.get_entity(link.url)
+    except RPCError as e:
+        # 접근 권한 문제, 삭제된 그룹 등은 조용히 스킵
+        print(f"[member_scraper] skip {link.url}: {e}")
+        return
+
+    async for user in client.iter_participants(entity):
+        if not isinstance(user, User):
+            continue
+
+        telegram_user_id = user.id
+        username = user.username or ""
+        last_seen = _status_to_str(user.status)
+
+        save_competitor_user(
+            source=link.brand_query,
+            group_url=link.url,
+            telegram_user_id=telegram_user_id,
+            username=username,
+            last_seen=last_seen,
+        )
+
+        # 너무 빠르게 긁지 않도록 사용자 단위 짧은 지연
+        if per_user_delay > 0:
+            await asyncio.sleep(per_user_delay)
+
+
+async def _scrape_all_members(
+    per_group_delay: float = 3.0,
+    per_user_delay: float = 0.1,
+) -> None:
+    _ensure_telegram_config()
+    print("🔍 구글에서 경쟁사 그룹 주소를 찾는 중입니다... 잠시만 기다려주세요.")
+    links: Iterable[TelegramLink] = find_competitor_telegram_links()
+
+    client = TelegramClient(TG_SESSION_NAME, TG_API_ID, TG_API_HASH)
+    async with client:
+        for link in links:
+            print(f"[member_scraper] scraping members from {link.url} ({link.brand_query})")
+            await _scrape_group_members_for_link(
+                client,
+                link,
+                per_user_delay=per_user_delay,
+            )
+
+            # 그룹/채널 사이에는 더 긴 지연을 넣어 차단 위험을 줄입니다.
+            if per_group_delay > 0:
+                time.sleep(per_group_delay)
+
+
+def run_member_scraper() -> None:
+    """
+    경쟁사 텔레그램 그룹/채널의 멤버 정보를 수집해
+    competitor_users 테이블에 저장하는 진입점입니다.
+
+    예:
+        from app.services.member_scraper import run_member_scraper
+        run_member_scraper()
+    """
+    asyncio.run(_scrape_all_members())
+
