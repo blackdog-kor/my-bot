@@ -34,7 +34,7 @@ def _extract_telegram_links(page, brand_query: str) -> Iterable[TelegramLink]:
 
     # 일반적인 검색 결과 영역의 a 태그를 대상으로 처리
     for a in page.css("a", auto_save=False):
-        href = (a.attributes.get("href") or "").strip()
+        href = (a.attrib.get("href") or "").strip()
         text = (a.text or "").strip()
 
         if not href:

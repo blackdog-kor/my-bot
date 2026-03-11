@@ -7,10 +7,10 @@ from typing import Iterable
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
-from telethon.errors import RPCError
+from telethon.errors import RPCError, ChatAdminRequiredError, ChannelPrivateError
 from telethon.tl.types import User, UserStatusOffline, UserStatusOnline, UserStatusRecently
 
-from app.db import save_competitor_user
+from app.db import ensure_db, save_competitor_user
 from app.services.link_finder import TelegramLink, find_competitor_telegram_links
 
 
@@ -52,10 +52,14 @@ async def _scrape_group_members_for_link(
     """
     주어진 텔레그램 링크(그룹/채널)에 접속해 멤버 정보를 수집합니다.
     """
+    # URL에 붙은 텍스트 하이라이트/fragment (#:~:text=...) 는 제거해서 순수 채널 URL만 사용
+    raw_url = link.url
+    clean_url = raw_url.split("#", 1)[0]
+
     try:
         print(f"[member_scraper]   그룹 엔티티 조회 시도: {link.url}")
-        entity = await client.get_entity(link.url)
-    except RPCError as e:
+        entity = await client.get_entity(clean_url)
+    except (ValueError, RPCError) as e:
         # 접근 권한 문제, 삭제된 그룹 등은 조용히 스킵
         print(f"[member_scraper] skip {link.url}: {e}")
         return
@@ -63,27 +67,31 @@ async def _scrape_group_members_for_link(
     print(f"[member_scraper]   참가자 목록 조회 시작: {link.url}")
 
     count = 0
-    async for user in client.iter_participants(entity):
-        if not isinstance(user, User):
-            continue
+    try:
+        async for user in client.iter_participants(entity):
+            if not isinstance(user, User):
+                continue
 
-        telegram_user_id = user.id
-        username = user.username or ""
-        last_seen = _status_to_str(user.status)
+            telegram_user_id = user.id
+            username = user.username or ""
+            last_seen = _status_to_str(user.status)
 
-        save_competitor_user(
-            source=link.brand_query,
-            group_url=link.url,
-            telegram_user_id=telegram_user_id,
-            username=username,
-            last_seen=last_seen,
-        )
+            save_competitor_user(
+                source=link.brand_query,
+                group_url=link.url,
+                telegram_user_id=telegram_user_id,
+                username=username,
+                last_seen=last_seen,
+            )
 
-        # 너무 빠르게 긁지 않도록 사용자 단위 짧은 지연
-        if per_user_delay > 0:
-            await asyncio.sleep(per_user_delay)
+            # 너무 빠르게 긁지 않도록 사용자 단위 짧은 지연
+            if per_user_delay > 0:
+                await asyncio.sleep(per_user_delay)
 
-        count += 1
+            count += 1
+    except (ChatAdminRequiredError, ChannelPrivateError) as e:
+        print(f"[member_scraper]   명단 조회 권한 없음 (건너뜀): {link.url} ({e})")
+        return
 
     print(f"[member_scraper]   참가자 목록 조회 완료: {link.url}, 수집 인원: {count}")
 
@@ -134,6 +142,9 @@ def run_member_scraper() -> None:
     print("🚀 [START] 스크래퍼 진입 완료", flush=True)
 
     try:
+        # DB 스키마(competitor_users 등)를 먼저 준비
+        ensure_db()
+
         print("🔑 텔레그램 비동기 루프(asyncio) 시작 시도...", flush=True)
         asyncio.run(_scrape_all_members())
         print("✅ [END] 모든 작업이 성공적으로 끝났습니다.", flush=True)
