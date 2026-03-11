@@ -216,9 +216,10 @@ def build_post_template(lang: str, key: str) -> str:
     message = pack["menu_texts"][key]["message"]
     footer = pack["post_footer_template"]
     promo = pack["promo_footer_template"]
+    promo_label = pack.get("promo_code_label", "Referral code")
 
-    # 추천인 코드는 항상 본문 하단에 코드 블록으로 표시
-    promo_code_line = f"추천인 코드: {PROMO_CODE}"
+    # 추천인 코드는 항상 본문 하단에 코드 블록으로 표시 (다국어 라벨 사용)
+    promo_code_line = f"{promo_label}: {PROMO_CODE}"
 
     return f"{header}\n\n{title}\n\n{message}\n\n{footer}\n\n{promo}\n\n{promo_code_line}"
 
@@ -291,12 +292,6 @@ def build_buttons(lang: str, key: str, user_id: int) -> InlineKeyboardMarkup:
                     url=CONTENT["menus"]["support"]["support_url"],
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    pack["close_button"],
-                    callback_data="close",
-                )
-            ],
         ]
     else:
         register_url = _build_tracking_url(key, kind="register", user_id=user_id)
@@ -313,12 +308,6 @@ def build_buttons(lang: str, key: str, user_id: int) -> InlineKeyboardMarkup:
                     url=lobby_url,
                 ),
             ],
-            [
-                InlineKeyboardButton(
-                    pack["close_button"],
-                    callback_data="close",
-                )
-            ],
         ]
 
     if CHANNEL_URL:
@@ -330,6 +319,15 @@ def build_buttons(lang: str, key: str, user_id: int) -> InlineKeyboardMarkup:
                 )
             ]
         )
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                pack["close_button"],
+                callback_data="close",
+            )
+        ]
+    )
 
     return InlineKeyboardMarkup(rows)
 
@@ -400,6 +398,7 @@ async def send_menu_anchor(
 async def upsert_text_post(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
+    lang: str,
     template_text: str,
     reply_markup: InlineKeyboardMarkup,
 ) -> None:
@@ -407,7 +406,9 @@ async def upsert_text_post(
     text, entities = render_custom_emoji_text(template_text)
 
     # Mark the referral code segment as a code block so it is easy to copy.
-    promo_prefix = "추천인 코드: "
+    pack = get_lang_pack(lang)
+    promo_label = pack.get("promo_code_label", "Referral code")
+    promo_prefix = f"{promo_label}: "
     idx = text.rfind(promo_prefix)
     if idx != -1:
         code_start = idx + len(promo_prefix)
@@ -469,6 +470,7 @@ async def show_menu_post(
     await upsert_text_post(
         context=context,
         chat_id=chat_id,
+        lang=lang,
         template_text=text,
         reply_markup=buttons,
     )
