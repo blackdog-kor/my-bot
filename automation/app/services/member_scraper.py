@@ -124,11 +124,20 @@ def run_member_scraper() -> None:
     """
     경쟁사 텔레그램 그룹/채널의 멤버 정보를 수집해
     competitor_users 테이블에 저장하는 진입점입니다.
-
-    예:
-        from app.services.member_scraper import run_member_scraper
-        run_member_scraper()
     """
-    print("🔑 텔레그램 접속을 시도합니다...")
-    asyncio.run(_scrape_all_members())
+    import sys  # 지역 import (터미널 환경 가정)
+
+    print("🚀 [START] 스크래퍼 진입 완료", flush=True)
+
+    try:
+        print("🔑 텔레그램 비동기 루프(asyncio) 시작 시도...", flush=True)
+        asyncio.run(_scrape_all_members())
+        print("✅ [END] 모든 작업이 성공적으로 끝났습니다.", flush=True)
+    except KeyboardInterrupt:
+        print("\n🛑 사용자에 의해 중단되었습니다.", flush=True)
+    except Exception as e:
+        print(f"❌ 실행 중 에러 발생: {e}", flush=True)
+        import traceback
+
+        traceback.print_exc()
 
