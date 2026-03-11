@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI, Request, HTTPException
 from telegram import BotCommand, Update
 from telegram.ext import Application
+import uvicorn
 
 from app.config import ADMIN_ID, BOT_TOKEN, CHANNEL_ID
 from app.db import (
@@ -362,3 +363,12 @@ async def video_callback(request: Request):
         }
 
     raise HTTPException(status_code=400, detail="status_must_be_completed_or_failed")
+
+
+if __name__ == "__main__":
+    # Railway와 같은 환경에서 직접 실행 시 Uvicorn으로 FastAPI 앱을 띄운다.
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8080)),
+    )
