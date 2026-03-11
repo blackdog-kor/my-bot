@@ -1,0 +1,7 @@
+python-telegram-bot==22.6
+APScheduler==3.10.4
+google-genai
+fastapi==0.115.0
+uvicorn==0.30.6
+sentry-sdk==2.23.1
+python-dotenv
