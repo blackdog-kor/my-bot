@@ -14,3 +14,5 @@ playwright
 msgspec
 lxml
 beautifulsoup4
+browserforge
+tldextract
