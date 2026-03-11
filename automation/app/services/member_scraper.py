@@ -89,13 +89,19 @@ async def _scrape_all_members(
     per_user_delay: float = 0.1,
 ) -> None:
     _ensure_telegram_config()
-    print("[member_scraper] 설정 확인 완료. TG_API_ID/TG_API_HASH 로 세션을 엽니다.")
-    print("🔍 구글에서 경쟁사 그룹 주소를 찾는 중입니다... 잠시만 기다려주세요.")
-    links: Iterable[TelegramLink] = find_competitor_telegram_links()
-    print(f"[member_scraper] 구글 검색에서 총 {len(list(links))}개 링크를 발견 (실제 순회 시작).")
-
     client = TelegramClient(TG_SESSION_NAME, TG_API_ID, TG_API_HASH)
+    print("[member_scraper] 설정 확인 완료. TG_API_ID/TG_API_HASH 로 세션을 엽니다.")
     print(f"[member_scraper] Telethon 클라이언트 세션 생성: {TG_SESSION_NAME}.session")
+
+    # 먼저 텔레그램 세션부터 안정적으로 로그인/연결
+    await client.start()
+    print("[member_scraper] Telethon 세션 start() 완료. 구글 검색을 시작합니다.")
+
+    print("🔍 구글에서 경쟁사 그룹 주소를 찾는 중입니다... 잠시만 기다려주세요.")
+    links_iter: Iterable[TelegramLink] = find_competitor_telegram_links()
+    links = list(links_iter)
+    print(f"[member_scraper] 구글 검색에서 총 {len(links)}개 링크를 발견 (실제 순회 시작).")
+
     async with client:
         print("[member_scraper] Telethon 세션 접속 완료. 그룹 순회를 시작합니다.")
         for link in links:
@@ -123,5 +129,6 @@ def run_member_scraper() -> None:
         from app.services.member_scraper import run_member_scraper
         run_member_scraper()
     """
+    print("🔑 텔레그램 접속을 시도합니다...")
     asyncio.run(_scrape_all_members())
 

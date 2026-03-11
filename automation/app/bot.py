@@ -61,7 +61,10 @@ BOT_USERNAME = os.getenv("BOT_USERNAME", "").strip()
 
 
 def is_admin(user_id: int) -> bool:
-    return user_id == ADMIN_ID
+    try:
+        return int(user_id) == int(ADMIN_ID)
+    except Exception:
+        return False
 
 
 def _callback_url() -> str:
@@ -1418,7 +1421,10 @@ ADMIN_MENU_BUTTONS = {
 
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    user_id = update.effective_user.id if update.effective_user else None
+    print(f"👤 관리자 명령어 수신! (ID: {user_id})")
+
+    if not is_admin(user_id):
         await update.message.reply_text("권한이 없습니다.")
         return
 
