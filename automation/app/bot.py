@@ -1474,15 +1474,20 @@ async def _handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         loop = context.application.loop
 
-        async def run_async():
-            links = await find_competitor_telegram_links()
+        async def run_in_thread():
+            from asyncio import to_thread
+
+            def _work():
+                return find_competitor_telegram_links()
+
+            links = await to_thread(_work)
             count = len(links)
             await context.bot.send_message(
                 chat_id=update.effective_user.id,
                 text=f"✅ 타겟 그룹 탐색 완료\n발견된 텔레그램 링크: {count}개",
             )
 
-        loop.create_task(run_async())
+        loop.create_task(run_in_thread())
         return
 
     if data == ADMIN_MENU_BUTTONS["scrape_members"]:

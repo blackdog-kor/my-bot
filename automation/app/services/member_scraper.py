@@ -102,7 +102,8 @@ async def _scrape_all_members(
     print("[member_scraper] Telethon 세션 start() 완료. 구글 검색을 시작합니다.")
 
     print("🔍 구글에서 경쟁사 그룹 주소를 찾는 중입니다... 잠시만 기다려주세요.")
-    links = await find_competitor_telegram_links()
+    # link_finder는 동기(Sync) 코드이므로, 별도 스레드에서 실행해 비동기 루프와 충돌을 피한다.
+    links = await asyncio.to_thread(find_competitor_telegram_links)
     print(f"[member_scraper] 구글 검색에서 총 {len(links)}개 링크를 발견 (실제 순회 시작).")
 
     async with client:
