@@ -140,4 +140,5 @@ def run_member_scraper() -> None:
         import traceback
 
         traceback.print_exc()
-
+if __name__ == "__main__":
+    run_member_scraper()
