@@ -28,7 +28,7 @@ GitHub PR 화면에서 아래만 확인하세요.
 
 1. 배포 대상 서비스가 `bot`인지 확인
 2. 환경변수 `BOT_TOKEN`이 설정되어 있는지 확인
-3. **채널 자동 포스팅(VIP 프리미엄 발송)** 사용 시: `CHANNEL_ID`(-100… 채널 ID), `POSTS_DB_PATH`, `ADMIN_ID`, `EVENT_PAGE_URL`, `PROMO_PAGE_URL`, `GAME_PAGE_URL`, `PROMO_CODE`, `GEMINI_API_KEY`, `BOT_USERNAME` 설정. **봇을 해당 채널 관리자로 추가하고 ‘게시물 게시’ 권한을 부여해야 합니다.** 배포 기동 시 채널에 1건 전송 후 1시간 간격 자동 발송. `/admin` 에서 유저 DM 발송 가능. 전송 실패 시 Railway 로그에서 "채널 전송 실패" 또는 "CHANNEL_ID 미설정" 확인.
+3. **채널 자동 포스팅** (봇은 채널 전용, 유저 DM은 automation에서 채널 게시물 활용): `CHANNEL_ID`(-100…), `ADMIN_ID`, `EVENT_PAGE_URL`, `PROMO_PAGE_URL`, `GAME_PAGE_URL`, `PROMO_CODE`, `GEMINI_API_KEY`, `BOT_USERNAME` 설정. **봇을 채널 관리자로 추가하고 ‘게시물 게시’ 권한 부여.** 기동 시 1건 + 1시간 간격 자동 발송.
 4. 배포 완료 후 Telegram에서 아래 순서로 실동작 테스트
    - `/start`
    - 언어 선택 버튼

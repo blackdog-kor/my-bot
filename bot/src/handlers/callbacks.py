@@ -557,25 +557,16 @@ def _is_admin(user_id: int | None) -> bool:
 
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """관리자 전용: 채널 자동 포스팅(VIP 프리미엄 발송) 메뉴."""
+    """관리자 전용: 채널 자동 포스팅 안내 (유저 DM은 automation에서 담당)."""
     if not update.message or not update.effective_user:
         return
     if not _is_admin(update.effective_user.id):
         await update.message.reply_text("권한이 없습니다.")
         return
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "🎰 VIP 프리미엄 발송",
-                    callback_data="premium_broadcast",
-                )
-            ],
-        ]
-    )
     await update.message.reply_text(
-        "관리자 메뉴입니다. 채널 자동 포스팅을 실행할 수 있습니다.",
-        reply_markup=keyboard,
+        "이 봇은 채널에만 게시물을 올립니다.\n"
+        "CHANNEL_ID 설정 시 기동 시 1건 + 1시간 간격 자동 발송됩니다.\n"
+        "유저 DM 홍보는 automation에서 채널 게시물을 활용해 진행합니다."
     )
 
 
@@ -585,34 +576,6 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await query.answer()
-
-    if query.data == "premium_broadcast":
-        if not _is_admin(update.effective_user.id if update.effective_user else None):
-            await query.edit_message_text("권한이 없습니다.")
-            return
-        try:
-            await query.edit_message_text(
-                "🎰 VIP 프리미엄 발송을 시작합니다.\n(500명 단위 청크 + 슬립, 완료 시 알림)"
-            )
-        except Exception:
-            pass
-        try:
-            from app.services.premium_formatter import run_premium_campaign_async
-            result = await run_premium_campaign_async(
-                context.bot,
-                chunk_size=500,
-                sleep_after_chunk_sec=1.2,
-            )
-            await query.edit_message_text(
-                f"✅ VIP 프리미엄 발송 완료\n성공: {result['sent']}명 / 실패: {result['failed']}명"
-            )
-        except Exception as e:
-            logger.exception("premium_broadcast error: %s", e)
-            try:
-                await query.edit_message_text(f"❌ 발송 실패: {e}")
-            except Exception:
-                pass
-        return
 
     if query.data == "close":
         await close_content_post(context, query.message.chat_id)
