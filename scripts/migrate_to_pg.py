@@ -79,16 +79,23 @@ def migrate_competitor_users(conn) -> int:
         return 0
 
     inserted = 0
+    total_rows = len(rows)
+    print(f"competitor_users: 총 {total_rows}명 처리 시작...", flush=True)
     with conn:
         with conn.cursor() as cur:
-            for uid, username in rows:
-                cur.execute("""
-                    INSERT INTO broadcast_targets (telegram_user_id, username, source)
-                    VALUES (%s, %s, 'scraper')
-                    ON CONFLICT (telegram_user_id) DO NOTHING
-                """, (int(uid), username or ""))
-                inserted += cur.rowcount
-    print(f"competitor_users → broadcast_targets: {len(rows)} read, {inserted} new inserted (rest already existed)")
+            for i, (uid, username) in enumerate(rows, start=1):
+                try:
+                    cur.execute("""
+                        INSERT INTO broadcast_targets (telegram_user_id, username, source)
+                        VALUES (%s, %s, 'scraper')
+                        ON CONFLICT (telegram_user_id) DO NOTHING
+                    """, (int(uid), username or ""))
+                    inserted += cur.rowcount
+                except Exception:
+                    pass
+                if i % 500 == 0:
+                    print(f"✅ [진행 상황] {i}명 마이그레이션 완료... (전체 {total_rows}명 중)", flush=True)
+    print(f"competitor_users → broadcast_targets: {total_rows}명 읽음, {inserted}명 신규 삽입 (나머지는 이미 존재)", flush=True)
     return inserted
 
 
@@ -112,16 +119,23 @@ def migrate_bot_users(conn) -> int:
         return 0
 
     inserted = 0
+    total_rows = len(rows)
+    print(f"bot users: 총 {total_rows}명 처리 시작...", flush=True)
     with conn:
         with conn.cursor() as cur:
-            for uid, username in rows:
-                cur.execute("""
-                    INSERT INTO broadcast_targets (telegram_user_id, username, source)
-                    VALUES (%s, %s, 'bot')
-                    ON CONFLICT (telegram_user_id) DO NOTHING
-                """, (int(uid), username or ""))
-                inserted += cur.rowcount
-    print(f"bot users → broadcast_targets: {len(rows)} read, {inserted} new inserted (rest already existed)")
+            for i, (uid, username) in enumerate(rows, start=1):
+                try:
+                    cur.execute("""
+                        INSERT INTO broadcast_targets (telegram_user_id, username, source)
+                        VALUES (%s, %s, 'bot')
+                        ON CONFLICT (telegram_user_id) DO NOTHING
+                    """, (int(uid), username or ""))
+                    inserted += cur.rowcount
+                except Exception:
+                    pass
+                if i % 500 == 0:
+                    print(f"✅ [진행 상황] {i}명 마이그레이션 완료... (전체 {total_rows}명 중)", flush=True)
+    print(f"bot users → broadcast_targets: {total_rows}명 읽음, {inserted}명 신규 삽입 (나머지는 이미 존재)", flush=True)
     return inserted
 
 
