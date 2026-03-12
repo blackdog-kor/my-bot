@@ -139,19 +139,39 @@ def build_header_message(bot_link: str) -> str:
     return f"\n\n<b>{link}</b>\n\n"
 
 
+def _normalize_diamond_bullets(text: str) -> str:
+    """Ensure each line of the bullet block starts with 💎 (match reference post style)."""
+    lines = [ln.strip() for ln in (text or "").strip().splitlines() if ln.strip()]
+    out = []
+    for ln in lines[:6]:  # cap at 6
+        if not ln.startswith("💎"):
+            ln = "💎 " + ln
+        out.append(ln)
+    return "\n".join(out) if out else "💎 VIP benefits & cashback\n💎 Premium gifts\n💎 Member-only promotions\n💎 Priority support"
+
+
 def build_premium_caption(promo_summary: str, promo_code: str) -> str:
-    """Caption under image: body (4–5 line bullets), then two line breaks, then Referral code + code with spacing."""
-    body = (promo_summary or (BOT_EMOJI_PREFIX + "• VIP events await. Join now!")).strip()
+    """Caption under image: same layout as reference — bold header, intro, 💎 bullets, quote, bold CTA, Referral code."""
+    bullets = _normalize_diamond_bullets(
+        promo_summary or "💎 VIP benefits\n💎 Premium gifts\n💎 Member-only promotions\n💎 Priority support"
+    )
     code_val = (promo_code or "PROMO").strip()
-    # Two line breaks after body, then "Referral code" on its own line, then code on next line
-    return f"{body}\n\n\nReferral code\n<code>{_html_esc(code_val)}</code>"
+    return (
+        "<b>Your daily privileges 💎</b>\n\n"
+        "Unlock the full potential of your experience with VIP status:\n\n"
+        f"{bullets}\n\n"
+        "Concierge—your dedicated assistant for any task: end-to-end support, priority access, and more.\n\n"
+        "<b>Check our bonuses here to fast-track your way to the VIP club!</b>"
+        "\n\n\nReferral code\n"
+        f"<code>{_html_esc(code_val)}</code>"
+    )
 
 
 def build_premium_keyboard(game_page_url: str) -> InlineKeyboardMarkup:
-    """Inline button below post: English label -> game page."""
+    """Inline button below post: 'Play now' -> game page (match reference)."""
     url = (game_page_url or "").strip() or "https://t.me/"
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Enter VIP Casino", url=url)]]
+        [[InlineKeyboardButton("Play now", url=url)]]
     )
 
 

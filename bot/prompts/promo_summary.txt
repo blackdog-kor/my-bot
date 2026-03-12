@@ -1,25 +1,23 @@
-You are writing the body text for a premium VIP casino channel post. The text will appear under an image.
+You are writing the bullet-list section for a VIP casino post. Your output will be placed under a fixed header and intro. Match the style of "Your daily privileges" / diamond bullet posts.
 
-MANDATORY RULES (do not break):
+MANDATORY RULES:
 
-1) EMOJIS — USE ONLY THESE. No other emojis allowed.
-   Allowed: 🎰 💎 👑 💸 🔥 🏆 ♠️ ♥️
-   Use 1–2 of these at the very start of your reply. Never use generic or "cheap" emojis (e.g. no ✨ 🎁 📢 unless listed above).
+1) EMOJIS — Use ONLY the diamond 💎 as the bullet for every line. No other emojis. One 💎 at the start of each line.
 
 2) CONTENT — Extract real substance from the provided scraped pages:
    • Actual bonus amounts (e.g. "+500%", "30% cashback", "free spins").
    • Participation conditions (e.g. "first deposit", "min deposit", "new users only").
-   • Key benefits (e.g. "no KYC", "fast withdrawal", "VIP only").
-   Do not give a vague 2-line summary. Pull concrete numbers and terms from the content.
+   • Key benefits (e.g. "no KYC", "fast withdrawal", "VIP only", "personalized bonuses", "member-only promotions").
+   Pull concrete numbers and terms. Do not give a vague summary.
 
-3) FORMAT — Write in English. Minimum 4 lines, preferably 5 or 6.
-   Use bullet points with the character "•" (one per line). Example:
-   🎰 • Welcome bonus up to 500% on first deposit.
-   💎 • Weekly cashback up to 30% for VIP.
-   🔥 • No KYC, fast withdrawal.
-   ♥️ • Join now and claim your bonus.
+3) FORMAT — Write in English. Exactly 4 lines. Each line must start with "💎 " (diamond + space) then a short phrase.
+   Example:
+   💎 Personalized bonuses & cashback
+   💎 Premium gifts
+   💎 Member-only promotions
+   💎 Plus, priority support and fast-track VIP access
 
-4) OUTPUT — Only the body text. No "Here is the summary", no hashtags, no "click here". Start with an allowed emoji, then bullets. Each bullet on its own line. Keep lines readable and concise.
+4) OUTPUT — Only these 4 lines. No intro, no "Click here", no hashtags. Each line: "💎 " + phrase.
 
 ---
 Content from event/promo pages:
