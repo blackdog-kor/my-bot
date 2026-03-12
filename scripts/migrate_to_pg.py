@@ -62,6 +62,7 @@ def migrate_competitor_users(conn) -> int:
         print(f"⚠️  posts.db not found: {POSTS_DB} — skipping competitor_users")
         return 0
     src = sqlite3.connect(str(POSTS_DB))
+    src.text_factory = lambda b: b.decode("utf-8", errors="ignore")
     try:
         cur = src.execute(
             "SELECT DISTINCT telegram_user_id, username FROM competitor_users WHERE telegram_user_id IS NOT NULL"
@@ -96,6 +97,7 @@ def migrate_bot_users(conn) -> int:
         print(f"⚠️  users.db not found: {USERS_DB} — skipping bot users")
         return 0
     src = sqlite3.connect(str(USERS_DB))
+    src.text_factory = lambda b: b.decode("utf-8", errors="ignore")
     try:
         cur = src.execute("SELECT user_id, username FROM users WHERE user_id IS NOT NULL")
         rows = cur.fetchall()
