@@ -1,8 +1,7 @@
 """
 Channel-only auto-posting (user DM is handled by automation using channel posts).
-Layout (like reference: link above image, then image + caption + button):
-- First message (above image): single line = viP cAsiNo club as bot hyperlink (BOT_USERNAME), no emoji.
-- Second message: image + caption (body 3 lines + promo code) + inline button in English.
+Layout: (1) Header message with bold ( viP cAsiNo cLub ) link + line breaks.
+(2) Image + caption: 4–5 line bullet body, then Referral code + code with spacing, then inline button.
 """
 from __future__ import annotations
 
@@ -19,17 +18,15 @@ logger = logging.getLogger(__name__)
 
 _BOT_ROOT = Path(__file__).resolve().parents[2]
 CASINO_IMAGES_DIR = _BOT_ROOT / "assets" / "casino_images"
+PROMPT_PATH = _BOT_ROOT / "prompts" / "promo_summary.txt"
 
+# Premium emojis only (no generic/cheap). Used to validate/sanitize Gemini output.
+PREMIUM_EMOJIS = "🎰💎👑💸🔥🏆♠️♥️"
 BOT_EMOJI_PREFIX = "🎰 "
 
-PROMO_SUMMARY_PROMPT = """You are summarizing a casino/betting promo or event page for a short channel post.
-Rules:
-- Output exactly 2 or 3 short lines in English. No bullet list, no extra intro.
-- Put 1 or 2 emojis from this set at the very start: 🎰 💎 🔥 ✨ 🎁
-- Focus on: main offer, key bonus/event, and one clear CTA (e.g. join now, claim bonus).
-- No hashtags, no "click here", no repetition. Output only the summary.
-
-Content:
+# Fallback prompt if file missing
+PROMO_SUMMARY_PROMPT_FALLBACK = """Summarize the casino/promo content in English. Use only these emojis at the start: 🎰 💎 👑 💸 🔥 🏆 ♠️ ♥️
+Output at least 4 lines as bullet points (•). Include actual bonus amounts, conditions, and key benefits from the text.
 ---
 {raw_content}
 ---
@@ -43,26 +40,45 @@ def _bot_start_link(start_param: str = "promo") -> str:
     return "https://t.me/"
 
 
+def _load_promo_prompt() -> str:
+    """Load prompt from prompts/promo_summary.txt or use fallback."""
+    if PROMPT_PATH.is_file():
+        try:
+            return PROMPT_PATH.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning("Failed to load prompt file %s: %s", PROMPT_PATH, e)
+    return PROMO_SUMMARY_PROMPT_FALLBACK
+
+
+def _ensure_premium_emoji_prefix(text: str) -> str:
+    """Ensure text starts with one of PREMIUM_EMOJIS; otherwise prepend BOT_EMOJI_PREFIX."""
+    if not text:
+        return BOT_EMOJI_PREFIX + "VIP events await. Join now!"
+    first = text[0]
+    # Allow any char that appears in premium set (including ♠ ♥ as single codepoint)
+    if any(first in c for c in PREMIUM_EMOJIS) or first in "♠♥":
+        return text
+    return BOT_EMOJI_PREFIX + text.lstrip()
+
+
 def _summarize_promo_with_gemini(raw_content: str) -> str:
-    """Summarize promo/event content in English with emoji at start (GEMINI_API_KEY)."""
+    """Summarize promo/event content: 4–5 line bullets, premium emojis only (GEMINI_API_KEY)."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    fallback = BOT_EMOJI_PREFIX + "VIP events await. Join now!"
+    fallback = BOT_EMOJI_PREFIX + "• VIP events await. Join now!"
     if not api_key:
         return fallback
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
         model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
-        text = (raw_content or "")[:8000]
-        prompt = PROMO_SUMMARY_PROMPT.format(raw_content=text)
+        text = (raw_content or "")[:12000]
+        prompt_template = _load_promo_prompt()
+        prompt = prompt_template.format(raw_content=text)
         response = client.models.generate_content(model=model, contents=prompt)
         out = (response.text or "").strip()
         if not out:
             return fallback
-        # Ensure body starts with a bot emoji if Gemini omitted it
-        if out[0] not in "🎰💎🔥✨🎁":
-            out = BOT_EMOJI_PREFIX + out
-        return out
+        return _ensure_premium_emoji_prefix(out)
     except Exception as e:
         logger.warning("Gemini summary failed: %s", e)
         return fallback
@@ -118,16 +134,17 @@ def _html_esc(s: str) -> str:
 
 
 def build_header_message(bot_link: str) -> str:
-    """Single line for the message above the image: viP cAsiNo club as clickable link (BOT_USERNAME)."""
-    return f'<a href="{_html_esc(bot_link)}">viP cAsiNo club</a>'
+    """Message above the image: bold ( viP cAsiNo cLub ) as link, with clear line breaks so it is a standalone header."""
+    link = f'<a href="{_html_esc(bot_link)}">( viP cAsiNo cLub )</a>'
+    return f"\n\n<b>{link}</b>\n\n"
 
 
 def build_premium_caption(promo_summary: str, promo_code: str) -> str:
-    """Caption under the image only: body (2–3 lines) + blank line + promo code line. No link line."""
-    body = (promo_summary or (BOT_EMOJI_PREFIX + "VIP events await. Join now!")).strip()
+    """Caption under image: body (4–5 line bullets), then two line breaks, then Referral code + code with spacing."""
+    body = (promo_summary or (BOT_EMOJI_PREFIX + "• VIP events await. Join now!")).strip()
     code_val = (promo_code or "PROMO").strip()
-    code_line = f"promo code <code>{_html_esc(code_val)}</code>"
-    return f"{body}\n\n{code_line}"
+    # Two line breaks after body, then "Referral code" on its own line, then code on next line
+    return f"{body}\n\n\nReferral code\n<code>{_html_esc(code_val)}</code>"
 
 
 def build_premium_keyboard(game_page_url: str) -> InlineKeyboardMarkup:
@@ -196,4 +213,45 @@ async def post_premium_to_channel(bot) -> bool:
         return True
     except Exception as e:
         logger.exception("채널 전송 실패 (상세): %s", e)
+        return False
+
+
+async def send_premium_post_to_chat(bot, chat_id: int) -> bool:
+    """
+    Compose the same premium post (header + image + caption + button) and send to the given chat_id.
+    Used for /test_post so admin can preview in DM.
+    """
+    try:
+        game_page_url = (os.getenv("GAME_PAGE_URL") or "").strip()
+        promo_code = (os.getenv("PROMO_CODE") or "PROMO").strip()
+        bot_link = _bot_start_link("promo")
+        raw_content = get_event_and_promo_content()
+        summary = _summarize_promo_with_gemini(raw_content)
+        caption_html = build_premium_caption(summary, promo_code)
+        image_path = get_random_casino_image_path()
+        keyboard = build_premium_keyboard(game_page_url)
+        caption = (caption_html[:1024] if len(caption_html) > 1024 else caption_html)
+
+        header_html = build_header_message(bot_link)
+        await bot.send_message(chat_id=chat_id, text=header_html, parse_mode="HTML")
+
+        if image_path and os.path.isfile(image_path):
+            with open(image_path, "rb") as f:
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=f,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+        return True
+    except Exception as e:
+        logger.exception("Test post to chat %s failed: %s", chat_id, e)
         return False

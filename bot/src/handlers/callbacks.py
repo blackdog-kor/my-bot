@@ -566,8 +566,21 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         "이 봇은 채널에만 게시물을 올립니다.\n"
         "CHANNEL_ID 설정 시 기동 시 1건 + 1시간 간격 자동 발송됩니다.\n"
-        "유저 DM 홍보는 automation에서 채널 게시물을 활용해 진행합니다."
+        "유저 DM 홍보는 automation에서 채널 게시물을 활용해 진행합니다.\n\n"
+        "포스팅 미리보기: /test_post"
     )
+
+
+async def test_post_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin only: send current premium post format to admin DM for preview."""
+    if not update.message or not update.effective_user:
+        return
+    if not _is_admin(update.effective_user.id):
+        await update.message.reply_text("권한이 없습니다.")
+        return
+    from app.services.premium_formatter import send_premium_post_to_chat
+    sent = await send_premium_post_to_chat(context.bot, update.effective_user.id)
+    await update.message.reply_text("테스트 발송 완료. DM을 확인하세요." if sent else "테스트 발송 실패. 로그 확인.")
 
 
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

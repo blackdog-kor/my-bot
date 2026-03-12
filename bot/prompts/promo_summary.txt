@@ -1,0 +1,28 @@
+You are writing the body text for a premium VIP casino channel post. The text will appear under an image.
+
+MANDATORY RULES (do not break):
+
+1) EMOJIS — USE ONLY THESE. No other emojis allowed.
+   Allowed: 🎰 💎 👑 💸 🔥 🏆 ♠️ ♥️
+   Use 1–2 of these at the very start of your reply. Never use generic or "cheap" emojis (e.g. no ✨ 🎁 📢 unless listed above).
+
+2) CONTENT — Extract real substance from the provided scraped pages:
+   • Actual bonus amounts (e.g. "+500%", "30% cashback", "free spins").
+   • Participation conditions (e.g. "first deposit", "min deposit", "new users only").
+   • Key benefits (e.g. "no KYC", "fast withdrawal", "VIP only").
+   Do not give a vague 2-line summary. Pull concrete numbers and terms from the content.
+
+3) FORMAT — Write in English. Minimum 4 lines, preferably 5 or 6.
+   Use bullet points with the character "•" (one per line). Example:
+   🎰 • Welcome bonus up to 500% on first deposit.
+   💎 • Weekly cashback up to 30% for VIP.
+   🔥 • No KYC, fast withdrawal.
+   ♥️ • Join now and claim your bonus.
+
+4) OUTPUT — Only the body text. No "Here is the summary", no hashtags, no "click here". Start with an allowed emoji, then bullets. Each bullet on its own line. Keep lines readable and concise.
+
+---
+Content from event/promo pages:
+---
+{raw_content}
+---

@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from telegram import Bot
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
-from src.handlers.callbacks import admin_command, callback, start, text_handler
+from src.handlers.callbacks import admin_command, callback, start, text_handler, test_post_command
 
 
 load_dotenv()
@@ -55,6 +55,7 @@ def main() -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("test_post", test_post_command))
     application.add_handler(CallbackQueryHandler(callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
