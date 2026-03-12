@@ -83,7 +83,42 @@ DB.execute(
     )
     """
 )
+DB.execute(
+    """
+    CREATE TABLE IF NOT EXISTS loaded_message (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        loaded_at TEXT NOT NULL
+    )
+    """
+)
 DB.commit()
+
+
+def get_loaded_message() -> tuple[int, int] | None:
+    """Return (chat_id, message_id) of the currently loaded message, or None."""
+    cur = DB.execute(
+        "SELECT chat_id, message_id FROM loaded_message WHERE id = 1"
+    )
+    row = cur.fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def set_loaded_message(chat_id: int, message_id: int) -> None:
+    """Store the single loaded message (replaces any previous)."""
+    now = datetime.utcnow().isoformat()
+    DB.execute(
+        "INSERT OR REPLACE INTO loaded_message (id, chat_id, message_id, loaded_at) VALUES (1, ?, ?, ?)",
+        (chat_id, message_id, now),
+    )
+    DB.commit()
+
+
+def get_all_user_ids() -> list[int]:
+    """Return all user_id from users table for broadcast."""
+    cur = DB.execute("SELECT user_id FROM users ORDER BY user_id")
+    return [row[0] for row in cur.fetchall()]
 
 
 def save_user(user_id: int, username: str | None, language: str) -> None:
@@ -556,19 +591,119 @@ def _is_admin(user_id: int | None) -> bool:
     return ADMIN_ID is not None and user_id is not None and user_id == ADMIN_ID
 
 
+BROADCAST_CHUNK_SIZE = 500
+BROADCAST_SLEEP_SEC = 1.2
+CALLBACK_LAUNCH_LOADED = "launch_loaded"
+
+
+def _vip_casino_button_markup() -> InlineKeyboardMarkup:
+    """VIP CASINO button linking to GAME_PAGE_URL (for copy_message reply_markup)."""
+    url = (os.getenv("GAME_PAGE_URL") or "").strip() or "https://t.me/"
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("VIP CASINO", url=url)]]
+    )
+
+
+async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
+    """
+    Copy the loaded message to all users in chunks. Return summary message.
+    Uses copy_message + reply_markup (VIP CASINO). 500 per chunk, 1.2s sleep.
+    """
+    loaded = get_loaded_message()
+    if not loaded:
+        return "❌ 장전된 메시지가 없습니다. 먼저 영상/이미지+캡션 메시지를 봇에게 보내주세요."
+    from_chat_id, message_id = loaded
+    user_ids = get_all_user_ids()
+    if not user_ids:
+        return "❌ 발송할 유저가 없습니다. (users 테이블 비어 있음)"
+    reply_markup = _vip_casino_button_markup()
+    total = len(user_ids)
+    sent = 0
+    failed = 0
+    for i in range(0, total, BROADCAST_CHUNK_SIZE):
+        chunk = user_ids[i : i + BROADCAST_CHUNK_SIZE]
+        for uid in chunk:
+            try:
+                await bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id,
+                    reply_markup=reply_markup,
+                )
+                sent += 1
+            except Exception as e:
+                failed += 1
+                logger.warning("copy_message to %s failed: %s", uid, e)
+        # Notify admin after each chunk
+        try:
+            await bot.send_message(
+                admin_chat_id,
+                f"📤 청크 발송 완료 {min(i + BROADCAST_CHUNK_SIZE, total)}/{total} (성공 {sent}, 실패 {failed})",
+            )
+        except Exception:
+            pass
+        if i + BROADCAST_CHUNK_SIZE < total:
+            import asyncio
+            await asyncio.sleep(BROADCAST_SLEEP_SEC)
+    return f"✅ 발사 완료. 총 {total}명 중 성공 {sent}, 실패 {failed}"
+
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """관리자 전용: 채널 자동 포스팅 안내 (유저 DM은 automation에서 담당)."""
+    """관리자 전용: 장전/발사 안내 + [🚀 장전된 메시지 발사] 버튼."""
     if not update.message or not update.effective_user:
         return
     if not _is_admin(update.effective_user.id):
         await update.message.reply_text("권한이 없습니다.")
         return
-    await update.message.reply_text(
-        "이 봇은 채널에만 게시물을 올립니다.\n"
-        "CHANNEL_ID 설정 시 기동 시 1건 + 1시간 간격 자동 발송됩니다.\n"
-        "유저 DM 홍보는 automation에서 채널 게시물을 활용해 진행합니다.\n\n"
-        "포스팅 미리보기: /test_post"
+    loaded = get_loaded_message()
+    status = "✅ 장전됨 (발사 가능)" if loaded else "⚠️ 장전된 메시지 없음"
+    text = (
+        "📌 <b>원터치 복사 발송 (Copy Message)</b>\n\n"
+        "1️⃣ <b>장전</b>: 이 채팅에 영상 또는 이미지(캡션 가능) 메시지를 보내면 자동으로 장전됩니다.\n"
+        "2️⃣ <b>발사</b>: 아래 버튼을 누르면 저장된 메시지를 전체 유저에게 그대로 복사 발송합니다.\n"
+        "   • VIP CASINO 버튼이 자동으로 붙습니다.\n"
+        "   • 500명 단위 청크, 1.2초 간격으로 발송됩니다.\n\n"
+        f"현재 상태: {status}\n\n"
+        "미리보기: /test_post"
     )
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🚀 장전된 메시지 발사", callback_data=CALLBACK_LAUNCH_LOADED)]]
+    )
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def admin_load_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin only: when admin sends photo or video (with optional caption), save as 'loaded' message for broadcast."""
+    if not update.message or not update.effective_user:
+        return
+    if not _is_admin(update.effective_user.id):
+        return
+    msg = update.message
+    chat_id = msg.chat_id
+    message_id = msg.message_id
+    if msg.photo:
+        set_loaded_message(chat_id, message_id)
+        await update.message.reply_text(
+            "✅ 장전 완료 (이미지). 이 메시지가 발사 시 그대로 복사됩니다. /admin 에서 [🚀 장전된 메시지 발사] 를 눌러 발송하세요.",
+        )
+        return
+    if msg.video:
+        set_loaded_message(chat_id, message_id)
+        await update.message.reply_text(
+            "✅ 장전 완료 (영상). 이 메시지가 발사 시 그대로 복사됩니다. /admin 에서 [🚀 장전된 메시지 발사] 를 눌러 발송하세요.",
+        )
+        return
+    if msg.document and msg.document.mime_type and msg.document.mime_type.startswith("video/"):
+        set_loaded_message(chat_id, message_id)
+        await update.message.reply_text(
+            "✅ 장전 완료 (동영상 문서). 이 메시지가 발사 시 그대로 복사됩니다. /admin 에서 [🚀 장전된 메시지 발사] 를 눌러 발송하세요.",
+        )
+        return
+    if msg.document:
+        await update.message.reply_text(
+            "⚠️ 동영상 또는 이미지를 보내주시면 장전됩니다. (문서는 동영상 파일만 가능)",
+        )
+        return
 
 
 async def test_post_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -589,6 +724,15 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await query.answer()
+
+    if query.data == CALLBACK_LAUNCH_LOADED:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text("📤 발사 시작... 유저 목록을 불러오는 중입니다.")
+        summary = await _broadcast_loaded_message(context.bot, query.message.chat_id)
+        await query.message.reply_text(summary)
+        return
 
     if query.data == "close":
         await close_content_post(context, query.message.chat_id)
