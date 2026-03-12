@@ -249,6 +249,15 @@ def ensure_db() -> None:
     conn.commit()
     conn.close()
 
+    # Initialize PostgreSQL broadcast_targets table if DATABASE_URL is set
+    if os.getenv("DATABASE_URL", "").strip():
+        try:
+            from app.pg_broadcast import ensure_pg_table
+            ensure_pg_table()
+        except Exception as _pg_e:
+            import logging as _log
+            _log.getLogger(__name__).warning("pg ensure_pg_table failed: %s", _pg_e)
+
 
 def create_post(
     source: str,

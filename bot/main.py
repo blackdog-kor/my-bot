@@ -19,6 +19,14 @@ from src.handlers.callbacks import (
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Initialize PostgreSQL broadcast_targets table if DATABASE_URL is set
+if (os.getenv("DATABASE_URL") or "").strip():
+    try:
+        from app.pg_broadcast import ensure_pg_table
+        ensure_pg_table()
+    except Exception as _pg_e:
+        print(f"[PG] broadcast_targets init failed: {_pg_e}", flush=True)
 CHANNEL_ID = (os.getenv("CHANNEL_ID") or "").strip()
 
 # 레일 로그에서 반드시 보이도록 stdout에 즉시 출력 (버퍼 없음)

@@ -116,7 +116,16 @@ def set_loaded_message(chat_id: int, message_id: int) -> None:
 
 
 def get_all_user_ids() -> list[int]:
-    """Return all user_id from users table for broadcast."""
+    """Return broadcast target user IDs.
+    Uses PostgreSQL broadcast_targets (is_sent=FALSE) when DATABASE_URL is set;
+    otherwise falls back to local SQLite users table (all users)."""
+    db_url = (os.getenv("DATABASE_URL") or "").strip()
+    if db_url:
+        from app.pg_broadcast import get_unsent_user_ids
+        ids = get_unsent_user_ids()
+        if ids:
+            return ids
+        # If PostgreSQL is empty, fall back to SQLite so local testing still works
     cur = DB.execute("SELECT user_id FROM users ORDER BY user_id")
     return [row[0] for row in cur.fetchall()]
 
@@ -146,6 +155,14 @@ def save_user(user_id: int, username: str | None, language: str) -> None:
         )
 
     DB.commit()
+
+    # Also upsert into shared PostgreSQL broadcast_targets if DATABASE_URL is set
+    if (os.getenv("DATABASE_URL") or "").strip():
+        try:
+            from app.pg_broadcast import upsert_user as pg_upsert
+            pg_upsert(user_id, username or "", source="bot")
+        except Exception as e:
+            logger.warning("pg upsert_user(%s) failed: %s", user_id, e)
 
 
 def log_event(logger: logging.Logger, event: str, **fields) -> None:
@@ -617,11 +634,14 @@ async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
     if not user_ids:
         return "❌ 발송할 유저가 없습니다. (users 테이블 비어 있음)"
     reply_markup = _vip_casino_button_markup()
+    use_pg = bool((os.getenv("DATABASE_URL") or "").strip())
     total = len(user_ids)
     sent = 0
     failed = 0
+    import asyncio as _asyncio
     for i in range(0, total, BROADCAST_CHUNK_SIZE):
         chunk = user_ids[i : i + BROADCAST_CHUNK_SIZE]
+        chunk_sent: list[int] = []
         for uid in chunk:
             try:
                 await bot.copy_message(
@@ -631,9 +651,17 @@ async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
                     reply_markup=reply_markup,
                 )
                 sent += 1
+                chunk_sent.append(uid)
             except Exception as e:
                 failed += 1
                 logger.warning("copy_message to %s failed: %s", uid, e)
+        # Mark sent in PostgreSQL for is_sent pipeline
+        if use_pg and chunk_sent:
+            try:
+                from app.pg_broadcast import mark_sent
+                mark_sent(chunk_sent)
+            except Exception as e:
+                logger.warning("mark_sent failed for chunk: %s", e)
         # Notify admin after each chunk
         try:
             await bot.send_message(
@@ -643,8 +671,7 @@ async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
         except Exception:
             pass
         if i + BROADCAST_CHUNK_SIZE < total:
-            import asyncio
-            await asyncio.sleep(BROADCAST_SLEEP_SEC)
+            await _asyncio.sleep(BROADCAST_SLEEP_SEC)
     return f"✅ 발사 완료. 총 {total}명 중 성공 {sent}, 실패 {failed}"
 
 

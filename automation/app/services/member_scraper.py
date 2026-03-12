@@ -11,6 +11,7 @@ from telethon.errors import RPCError, ChatAdminRequiredError, ChannelPrivateErro
 from telethon.tl.types import User, UserStatusOffline, UserStatusOnline, UserStatusRecently
 
 from app.db import ensure_db, save_competitor_user
+from app.pg_broadcast import upsert_broadcast_target
 from app.services.link_finder import TelegramLink, find_competitor_telegram_links
 
 
@@ -82,6 +83,12 @@ async def _scrape_group_members_for_link(
                 telegram_user_id=telegram_user_id,
                 username=username,
                 last_seen=last_seen,
+            )
+            # Mirror into shared PostgreSQL broadcast_targets (is_sent=FALSE by default)
+            upsert_broadcast_target(
+                telegram_user_id=telegram_user_id,
+                username=username,
+                source=link.brand_query or "scraper",
             )
 
             # 너무 빠르게 긁지 않도록 사용자 단위 짧은 지연
