@@ -594,6 +594,7 @@ def _is_admin(user_id: int | None) -> bool:
 BROADCAST_CHUNK_SIZE = 500
 BROADCAST_SLEEP_SEC = 1.2
 CALLBACK_LAUNCH_LOADED = "launch_loaded"
+CALLBACK_TEST_LOADED = "test_loaded"
 
 
 def _vip_casino_button_markup() -> InlineKeyboardMarkup:
@@ -666,9 +667,10 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"현재 상태: {status}\n\n"
         "미리보기: /test_post"
     )
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🚀 장전된 메시지 발사", callback_data=CALLBACK_LAUNCH_LOADED)]]
-    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧪 장전된 메시지 테스트 (나에게만)", callback_data=CALLBACK_TEST_LOADED)],
+        [InlineKeyboardButton("🚀 장전된 메시지 발사", callback_data=CALLBACK_LAUNCH_LOADED)],
+    ])
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
@@ -724,6 +726,29 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await query.answer()
+
+    if query.data == CALLBACK_TEST_LOADED:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        loaded = get_loaded_message()
+        if not loaded:
+            await query.message.reply_text("❌ 장전된 메시지가 없습니다. 영상/이미지를 먼저 보내주세요.")
+            return
+        from_chat_id, message_id = loaded
+        admin_chat_id = query.message.chat_id
+        try:
+            await context.bot.copy_message(
+                chat_id=admin_chat_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id,
+                reply_markup=_vip_casino_button_markup(),
+            )
+            await query.message.reply_text("✅ 테스트 발송 완료. 위 메시지를 확인한 뒤 발사하세요.")
+        except Exception as e:
+            logger.exception("Test copy_message failed: %s", e)
+            await query.message.reply_text(f"❌ 테스트 발송 실패: {e}")
+        return
 
     if query.data == CALLBACK_LAUNCH_LOADED:
         if not _is_admin(query.from_user.id if query.from_user else None):
