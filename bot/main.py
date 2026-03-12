@@ -14,7 +14,12 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = (os.getenv("CHANNEL_ID") or "").strip()
 
-# 레일에서 CHANNEL_ID가 실제로 로드되는지 확인용 (값은 끝 4자리만)
+# 레일 로그에서 반드시 보이도록 stdout에 즉시 출력 (버퍼 없음)
+if CHANNEL_ID:
+    print("[ENV] CHANNEL_ID=설정됨 (끝4자리:%s)" % (CHANNEL_ID[-4:] if len(CHANNEL_ID) >= 4 else "?"), flush=True)
+else:
+    print("[ENV] CHANNEL_ID=미설정 — 채널 발송 안 함. Railway bot 서비스 Variables에 CHANNEL_ID(-100...) 추가 후 재배포", flush=True)
+
 _CHANNEL_ID_DBG = "설정됨(끝4자리:%s)" % CHANNEL_ID[-4:] if len(CHANNEL_ID) >= 4 else ("미설정(길이=%s)" % len(CHANNEL_ID))
 
 logging.basicConfig(
