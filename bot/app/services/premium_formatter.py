@@ -128,6 +128,50 @@ def build_premium_keyboard(game_page_url: str) -> InlineKeyboardMarkup:
     )
 
 
+async def post_premium_to_channel(bot) -> bool:
+    """
+    채널(CHANNEL_ID)에 프리미엄 게시물 1건 전송.
+    EVENT_PAGE_URL + PROMO_PAGE_URL 스크래핑 → Gemini 요약 → 랜덤 이미지 + 캡션 + 버튼.
+    """
+    channel_id = (os.getenv("CHANNEL_ID") or "").strip()
+    if not channel_id:
+        logger.warning("CHANNEL_ID 미설정, 채널 전송 스킵")
+        return False
+    game_page_url = (os.getenv("GAME_PAGE_URL") or "").strip()
+    promo_code = (os.getenv("PROMO_CODE") or "PROMO").strip()
+    bot_link = _bot_start_link("promo")
+
+    raw_content = get_event_and_promo_content()
+    summary = _summarize_promo_with_gemini(raw_content)
+    caption_html = build_premium_caption(summary, promo_code, bot_link)
+    image_path = get_random_casino_image_path()
+    keyboard = build_premium_keyboard(game_page_url)
+    caption = (caption_html[:1024] if len(caption_html) > 1024 else caption_html)
+
+    try:
+        if image_path and os.path.isfile(image_path):
+            with open(image_path, "rb") as f:
+                await bot.send_photo(
+                    chat_id=channel_id,
+                    photo=f,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+        else:
+            await bot.send_message(
+                chat_id=channel_id,
+                text=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+        logger.info("채널 전송 완료: %s", channel_id)
+        return True
+    except Exception as e:
+        logger.exception("채널 전송 실패: %s", e)
+        return False
+
+
 async def send_premium_post_to_user(
     bot,
     user_id: int,
