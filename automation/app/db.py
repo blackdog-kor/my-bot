@@ -934,3 +934,69 @@ def save_promotion(
     conn.commit()
     conn.close()
     return promo_id
+
+
+def export_competitor_users_to_csv_file(filepath: str, *, chunk_size: int = 500) -> int:
+    """
+    competitor_users 테이블을 청크 단위로 읽어 CSV 파일로 기록합니다.
+    메모리에 전체를 올리지 않고 fetchmany(chunk_size)만 사용합니다.
+    UTF-8 BOM + 헤더를 먼저 쓰고, 이후 청크마다 행만 추가합니다.
+
+    Returns:
+        기록된 데이터 행 수 (헤더 제외).
+    """
+    import csv
+
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, source, group_url, telegram_user_id, username, last_seen, scraped_at
+        FROM competitor_users
+        ORDER BY scraped_at DESC, id DESC
+        """
+    )
+    header = ["id", "source", "group_url", "telegram_user_id", "username", "last_seen", "scraped_at"]
+    total = 0
+    with open(filepath, "w", encoding="utf-8", newline="") as f:
+        f.write("\ufeff")
+        writer = csv.writer(f)
+        writer.writerow(header)
+        while True:
+            rows = cur.fetchmany(chunk_size)
+            if not rows:
+                break
+            writer.writerows([tuple(str(c) for c in row) for row in rows])
+            total += len(rows)
+    conn.close()
+    return total
+
+
+def export_competitor_users_csv() -> str:
+    """
+    competitor_users 테이블 전체를 CSV 문자열로 반환합니다.
+    소량 데이터용. 2만 명 이상은 export_competitor_users_to_csv_file + Telegram 전송을 사용하세요.
+    UTF-8 BOM을 붙여 엑셀에서 한글이 깨지지 않도록 합니다.
+    """
+    import csv
+    import io
+
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, source, group_url, telegram_user_id, username, last_seen, scraped_at
+        FROM competitor_users
+        ORDER BY scraped_at DESC, id DESC
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["id", "source", "group_url", "telegram_user_id", "username", "last_seen", "scraped_at"])
+    for row in rows:
+        writer.writerow([str(c) for c in row])
+
+    return "\ufeff" + buf.getvalue()

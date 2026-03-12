@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
 from contextlib import asynccontextmanager
+from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi import FastAPI, Request, HTTPException
@@ -19,6 +21,7 @@ from app.db import (
     attach_thumbnail,
     get_post,
     count_competitor_users,
+    export_competitor_users_to_csv_file,
 )
 from app.services.member_scraper import run_member_scraper
 from app.services.scheduler_service import scheduler
@@ -26,6 +29,7 @@ from app.bot import get_handlers, telegram_error_handler
 from app.publishers.telegram_pub import publish_to_telegram_channel
 from app.api.user_entry import router as user_entry_router
 from app.api.routes import health
+from app.api.routes import export
 from app.services.error_monitoring import (
     init_error_monitoring,
     capture_exception,
@@ -238,6 +242,42 @@ app = FastAPI(lifespan=lifespan)
 
 app.include_router(health.router)
 app.include_router(user_entry_router)
+
+
+@app.post("/api/export/competitor-users-telegram", tags=["Export"])
+async def export_competitor_users_send_telegram():
+    """
+    competitor_users 테이블을 500행 청크 단위로 CSV 파일에 기록한 뒤,
+    텔레그램 봇으로 ADMIN_ID 계정에 파일을 전송합니다. 메모리 사용을 최소화합니다.
+    """
+    global telegram_app
+
+    if telegram_app is None:
+        raise HTTPException(status_code=503, detail="telegram app not ready")
+    if not ADMIN_ID:
+        raise HTTPException(status_code=503, detail="ADMIN_ID not configured")
+
+    fd, path = tempfile.mkstemp(suffix=".csv")
+    try:
+        os.close(fd)
+        row_count = export_competitor_users_to_csv_file(path, chunk_size=500)
+        filename = f"competitor_users_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+        with open(path, "rb") as f:
+            await telegram_app.bot.send_document(
+                chat_id=int(ADMIN_ID),
+                document=f,
+                filename=filename,
+            )
+        return {
+            "ok": True,
+            "rows_exported": row_count,
+            "filename": filename,
+        }
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 @app.get("/webhook-status")
