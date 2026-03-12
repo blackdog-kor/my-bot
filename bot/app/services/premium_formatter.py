@@ -82,6 +82,22 @@ def get_promo_page_content(url: str) -> str:
         return ""
 
 
+def get_event_and_promo_content() -> str:
+    """EVENT_PAGE_URL, PROMO_PAGE_URL 두 곳에서 게시물 내용을 스크래핑해 합칩니다."""
+    event_url = (os.getenv("EVENT_PAGE_URL") or "").strip()
+    promo_url = (os.getenv("PROMO_PAGE_URL") or "").strip()
+    parts = []
+    if event_url:
+        text = get_promo_page_content(event_url)
+        if text:
+            parts.append(f"[이벤트 페이지]\n{text}")
+    if promo_url:
+        text = get_promo_page_content(promo_url)
+        if text:
+            parts.append(f"[프로모 페이지]\n{text}")
+    return "\n\n---\n\n".join(parts) if parts else ""
+
+
 def get_random_casino_image_path() -> str | None:
     """bot/assets/casino_images/ 내 이미지 중 random.choice로 하나 반환."""
     if not CASINO_IMAGES_DIR.is_dir():
@@ -168,15 +184,14 @@ async def run_premium_campaign_async(
 ) -> dict:
     """
     프로덕션급 프리미엄 포스팅 캠페인 실행.
-    레일 환경변수: BOT_USERNAME, PROMO_PAGE_URL, GAME_PAGE_URL, PROMO_CODE, GEMINI_API_KEY
+    레일 환경변수: BOT_USERNAME, EVENT_PAGE_URL, PROMO_PAGE_URL, GAME_PAGE_URL, PROMO_CODE, GEMINI_API_KEY
     """
-    promo_page_url = (promo_page_url or os.getenv("PROMO_PAGE_URL", "")).strip()
     game_page_url = (game_page_url or os.getenv("GAME_PAGE_URL", "")).strip()
     promo_code = (promo_code or os.getenv("PROMO_CODE", "PROMO")).strip()
     bot_link = _bot_start_link("promo")
 
     loop = asyncio.get_running_loop()
-    raw_content = await loop.run_in_executor(None, get_promo_page_content, promo_page_url)
+    raw_content = await loop.run_in_executor(None, get_event_and_promo_content)
     summary = await loop.run_in_executor(None, _summarize_promo_with_gemini, raw_content)
     caption_html = build_premium_caption(summary, promo_code, bot_link)
     image_path = await loop.run_in_executor(None, get_random_casino_image_path)
