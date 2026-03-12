@@ -19,18 +19,31 @@ logger = logging.getLogger(__name__)
 _BOT_ROOT = Path(__file__).resolve().parents[2]
 CASINO_IMAGES_DIR = _BOT_ROOT / "assets" / "casino_images"
 PROMPT_PATH = _BOT_ROOT / "prompts" / "promo_summary.txt"
+CONTENT_JSON_PATH = _BOT_ROOT / "config" / "content.json"
 
-# Premium emojis only (no generic/cheap). Used to validate/sanitize Gemini output.
-PREMIUM_EMOJIS = "🎰💎👑💸🔥🏆♠️♥️"
-BOT_EMOJI_PREFIX = "🎰 "
+# Same Unicode emojis as bot (callbacks.CUSTOM_EMOJIS) — use in caption instead of generic emojis.
+BOT_EMOJI_MAP = {
+    "{fire}": "🔥",
+    "{soccer}": "⚽",
+    "{plus}": "➕",
+    "{money}": "💸",
+    "{zap}": "⚡",
+    "{clap}": "👏",
+    "{mega}": "📢",
+    "{heart}": "❤️",
+    "{blue}": "🔵",
+}
 
-# Fallback prompt if file missing
-PROMO_SUMMARY_PROMPT_FALLBACK = """Summarize the casino/promo content in English. Use only these emojis at the start: 🎰 💎 👑 💸 🔥 🏆 ♠️ ♥️
-Output at least 4 lines as bullet points (•). Include actual bonus amounts, conditions, and key benefits from the text.
----
-{raw_content}
----
-"""
+# Fallback body if content.json missing (same as config content.json English common_header_template)
+_FALLBACK_HEADER_BODY = (
+    "🔥 1wiN viP cAsiNo cLub 🔥\n\n"
+    "⚽ Sports: Express Bonuses\n"
+    "➕ Fiat Deposits: +500% Bonus\n"
+    "➕ Crypto Deposits: +600% Bonus\n"
+    "💸 Casino: Up to 30% Weekly Cashback\n"
+    "⚡ Withdrawals: Lightning-fast / No KYC\n\n"
+    "👏 Private VIP entry with faster access, stronger bonuses and a cleaner playing route for premium members."
+)
 
 
 def _bot_start_link(start_param: str = "promo") -> str:
@@ -40,48 +53,23 @@ def _bot_start_link(start_param: str = "promo") -> str:
     return "https://t.me/"
 
 
-def _load_promo_prompt() -> str:
-    """Load prompt from prompts/promo_summary.txt or use fallback."""
-    if PROMPT_PATH.is_file():
-        try:
-            return PROMPT_PATH.read_text(encoding="utf-8")
-        except Exception as e:
-            logger.warning("Failed to load prompt file %s: %s", PROMPT_PATH, e)
-    return PROMO_SUMMARY_PROMPT_FALLBACK
-
-
-def _ensure_premium_emoji_prefix(text: str) -> str:
-    """Ensure text starts with one of PREMIUM_EMOJIS; otherwise prepend BOT_EMOJI_PREFIX."""
-    if not text:
-        return BOT_EMOJI_PREFIX + "VIP events await. Join now!"
-    first = text[0]
-    # Allow any char that appears in premium set (including ♠ ♥ as single codepoint)
-    if any(first in c for c in PREMIUM_EMOJIS) or first in "♠♥":
-        return text
-    return BOT_EMOJI_PREFIX + text.lstrip()
-
-
-def _summarize_promo_with_gemini(raw_content: str) -> str:
-    """Summarize promo/event content: 4–5 line bullets, premium emojis only (GEMINI_API_KEY)."""
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    fallback = BOT_EMOJI_PREFIX + "• VIP events await. Join now!"
-    if not api_key:
-        return fallback
+def _get_bot_header_body() -> str:
+    """Load English common_header_template from config/content.json and replace {token} with same Unicode emojis as bot."""
+    if not CONTENT_JSON_PATH.is_file():
+        return _FALLBACK_HEADER_BODY
     try:
-        from google import genai
-        client = genai.Client(api_key=api_key)
-        model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
-        text = (raw_content or "")[:12000]
-        prompt_template = _load_promo_prompt()
-        prompt = prompt_template.format(raw_content=text)
-        response = client.models.generate_content(model=model, contents=prompt)
-        out = (response.text or "").strip()
-        if not out:
-            return fallback
-        return _ensure_premium_emoji_prefix(out)
+        import json
+        data = json.loads(CONTENT_JSON_PATH.read_text(encoding="utf-8"))
+        pack = (data.get("languages") or {}).get("English") or {}
+        template = (pack.get("common_header_template") or "").strip()
+        if not template:
+            return _FALLBACK_HEADER_BODY
+        for token, emoji in BOT_EMOJI_MAP.items():
+            template = template.replace(token, emoji)
+        return template
     except Exception as e:
-        logger.warning("Gemini summary failed: %s", e)
-        return fallback
+        logger.warning("Failed to load content.json for header body: %s", e)
+        return _FALLBACK_HEADER_BODY
 
 
 def get_promo_page_content(url: str) -> str:
@@ -139,32 +127,12 @@ def build_header_message(bot_link: str) -> str:
     return f"\n\n<b>{link}</b>\n\n"
 
 
-def _normalize_diamond_bullets(text: str) -> str:
-    """Ensure each line of the bullet block starts with 💎 (match reference post style)."""
-    lines = [ln.strip() for ln in (text or "").strip().splitlines() if ln.strip()]
-    out = []
-    for ln in lines[:6]:  # cap at 6
-        if not ln.startswith("💎"):
-            ln = "💎 " + ln
-        out.append(ln)
-    return "\n".join(out) if out else "💎 VIP benefits & cashback\n💎 Premium gifts\n💎 Member-only promotions\n💎 Priority support"
-
-
-def build_premium_caption(promo_summary: str, promo_code: str) -> str:
-    """Caption under image: same layout as reference — bold header, intro, 💎 bullets, quote, bold CTA, Referral code."""
-    bullets = _normalize_diamond_bullets(
-        promo_summary or "💎 VIP benefits\n💎 Premium gifts\n💎 Member-only promotions\n💎 Priority support"
-    )
+def build_premium_caption(promo_code: str) -> str:
+    """Caption under image: same as existing bot (common_header with 🔥⚽➕💸⚡👏), last line 💎 VIP Promotions + copyable code."""
+    body = _get_bot_header_body()
     code_val = (promo_code or "PROMO").strip()
-    return (
-        "<b>Your daily privileges 💎</b>\n\n"
-        "Unlock the full potential of your experience with VIP status:\n\n"
-        f"{bullets}\n\n"
-        "Concierge—your dedicated assistant for any task: end-to-end support, priority access, and more.\n\n"
-        "<b>Check our bonuses here to fast-track your way to the VIP club!</b>"
-        "\n\n\nReferral code\n"
-        f"<code>{_html_esc(code_val)}</code>"
-    )
+    # Last line: VIP Promotions with code — <code> makes it copyable on tap/select in Telegram
+    return f"{body}\n\n💎 VIP Promotions  <code>{_html_esc(code_val)}</code>"
 
 
 def build_premium_keyboard(game_page_url: str) -> InlineKeyboardMarkup:
@@ -178,7 +146,7 @@ def build_premium_keyboard(game_page_url: str) -> InlineKeyboardMarkup:
 async def post_premium_to_channel(bot) -> bool:
     """
     Send one premium post to channel (CHANNEL_ID).
-    Scrapes EVENT_PAGE_URL + PROMO_PAGE_URL → Gemini summary → random image + caption + button.
+    Uses same caption as existing bot (config content.json common_header + 💎 VIP Promotions + copyable code), random image + button.
     """
     channel_id = (os.getenv("CHANNEL_ID") or "").strip()
     if not channel_id:
@@ -193,11 +161,7 @@ async def post_premium_to_channel(bot) -> bool:
         if not (os.getenv("BOT_USERNAME") or "").strip():
             logger.warning("BOT_USERNAME not set — bot link above image may not open the correct bot. Set it in Railway Variables.")
 
-        raw_content = get_event_and_promo_content()
-        logger.info("스크래핑 완료, 본문 길이: %s", len(raw_content or ""))
-
-        summary = _summarize_promo_with_gemini(raw_content)
-        caption_html = build_premium_caption(summary, promo_code)
+        caption_html = build_premium_caption(promo_code)
         image_path = get_random_casino_image_path()
         logger.info("이미지 경로: %s", image_path or "(없음, 텍스트만 전송)")
 
@@ -245,9 +209,7 @@ async def send_premium_post_to_chat(bot, chat_id: int) -> bool:
         game_page_url = (os.getenv("GAME_PAGE_URL") or "").strip()
         promo_code = (os.getenv("PROMO_CODE") or "PROMO").strip()
         bot_link = _bot_start_link("promo")
-        raw_content = get_event_and_promo_content()
-        summary = _summarize_promo_with_gemini(raw_content)
-        caption_html = build_premium_caption(summary, promo_code)
+        caption_html = build_premium_caption(promo_code)
         image_path = get_random_casino_image_path()
         keyboard = build_premium_keyboard(game_page_url)
         caption = (caption_html[:1024] if len(caption_html) > 1024 else caption_html)
