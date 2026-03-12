@@ -40,6 +40,8 @@ BASE_URL = (os.getenv("BASE_URL") or "").rstrip("/")
 PARTNER_ID = os.getenv("PARTNER_ID") or ""
 PROMO_CODE = os.getenv("PROMO_CODE") or "1wiNcLub777"
 CHANNEL_URL = os.getenv("CHANNEL_URL") or ""
+ADMIN_ID_RAW = os.getenv("ADMIN_ID") or ""
+ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 
 LANGUAGE_OPTIONS = [["English", "한국어"], ["中文", "Português"]]
 MENU_ORDER = ["promotion", "event", "slot", "baccarat", "sports", "support"]
@@ -550,12 +552,67 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await show_menu_post(context, chat_id, lang, key)
 
 
+def _is_admin(user_id: int | None) -> bool:
+    return ADMIN_ID is not None and user_id is not None and user_id == ADMIN_ID
+
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """관리자 전용: 채널 자동 포스팅(VIP 프리미엄 발송) 메뉴."""
+    if not update.message or not update.effective_user:
+        return
+    if not _is_admin(update.effective_user.id):
+        await update.message.reply_text("권한이 없습니다.")
+        return
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🎰 VIP 프리미엄 발송",
+                    callback_data="premium_broadcast",
+                )
+            ],
+        ]
+    )
+    await update.message.reply_text(
+        "관리자 메뉴입니다. 채널 자동 포스팅을 실행할 수 있습니다.",
+        reply_markup=keyboard,
+    )
+
+
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
         return
 
     await query.answer()
+
+    if query.data == "premium_broadcast":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await query.edit_message_text("권한이 없습니다.")
+            return
+        try:
+            await query.edit_message_text(
+                "🎰 VIP 프리미엄 발송을 시작합니다.\n(500명 단위 청크 + 슬립, 완료 시 알림)"
+            )
+        except Exception:
+            pass
+        try:
+            from app.services.premium_formatter import run_premium_campaign_async
+            result = await run_premium_campaign_async(
+                context.bot,
+                chunk_size=500,
+                sleep_after_chunk_sec=1.2,
+            )
+            await query.edit_message_text(
+                f"✅ VIP 프리미엄 발송 완료\n성공: {result['sent']}명 / 실패: {result['failed']}명"
+            )
+        except Exception as e:
+            logger.exception("premium_broadcast error: %s", e)
+            try:
+                await query.edit_message_text(f"❌ 발송 실패: {e}")
+            except Exception:
+                pass
+        return
 
     if query.data == "close":
         await close_content_post(context, query.message.chat_id)

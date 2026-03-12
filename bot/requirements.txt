@@ -2,3 +2,6 @@ Flask
 httpx
 python-dotenv
 python-telegram-bot
+google-genai
+beautifulsoup4
+lxml

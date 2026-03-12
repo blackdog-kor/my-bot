@@ -20,6 +20,7 @@ CHANNEL_ID = os.getenv("CHANNEL_ID") or SETTINGS["channel_id"]
 DEFAULT_LANGUAGE = SETTINGS.get("default_language", "한국어")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "").strip()
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

@@ -905,6 +905,26 @@ def count_competitor_users() -> int:
     return int(count)
 
 
+def iter_competitor_telegram_user_ids(chunk_size: int = 500):
+    """
+    competitor_users 테이블에서 telegram_user_id를 청크 단위로 yield합니다.
+    메모리 최적화: fetchmany(chunk_size)만 사용합니다.
+    """
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT telegram_user_id FROM competitor_users ORDER BY id"
+        )
+        while True:
+            rows = cur.fetchmany(chunk_size)
+            if not rows:
+                break
+            yield [row[0] for row in rows]
+    finally:
+        conn.close()
+
+
 def save_promotion(
     source: str,
     title: str,
