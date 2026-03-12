@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -51,7 +52,7 @@ from app.publishers.telegram_pub import (
 )
 from app.services.link_finder import find_competitor_telegram_links
 from app.services.member_scraper import run_member_scraper
-from app.db import count_competitor_users
+from app.db import count_competitor_users, export_competitor_users_to_csv_file
 
 ai_service = AIService()
 pipeline_service = PipelineService()
@@ -1418,6 +1419,7 @@ ADMIN_MENU_BUTTONS = {
     "find_groups": "find_groups",
     "scrape_members": "scrape_members",
     "show_stats": "show_stats",
+    "export_csv": "export_csv",
 }
 
 
@@ -1448,6 +1450,12 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton(
                         "📊 수집 현황 확인",
                         callback_data=ADMIN_MENU_BUTTONS["show_stats"],
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "📤 CSV 내보내기",
+                        callback_data=ADMIN_MENU_BUTTONS["export_csv"],
                     )
                 ],
             ]
@@ -1524,6 +1532,42 @@ async def _handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(
             f"📊 현재 competitor_users 에 저장된 유저 수: {total}명"
         )
+        return
+
+    if data == ADMIN_MENU_BUTTONS["export_csv"]:
+        await query.answer()
+        await query.edit_message_text("📤 CSV 생성 중... (청크 단위 처리)")
+
+        loop = context.application.loop
+
+        async def run_export():
+            from asyncio import to_thread
+
+            fd, path = tempfile.mkstemp(suffix=".csv")
+            try:
+                os.close(fd)
+                row_count = await to_thread(
+                    lambda: export_competitor_users_to_csv_file(path, chunk_size=500)
+                )
+                filename = f"competitor_users_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+                with open(path, "rb") as f:
+                    await context.bot.send_document(
+                        chat_id=update.effective_user.id,
+                        document=f,
+                        filename=filename,
+                    )
+                await query.edit_message_text(
+                    f"✅ CSV 전송 완료\n총 {row_count}명"
+                )
+            except Exception as e:
+                await query.edit_message_text(f"❌ CSV 내보내기 실패: {e}")
+            finally:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+
+        loop.create_task(run_export())
         return
 
 
