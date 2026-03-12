@@ -651,7 +651,7 @@ def _vip_casino_button_markup() -> InlineKeyboardMarkup:
 
 
 async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
-    """UserBot(Pyrogram) 기반 전체 발송. PYROGRAM_SESSION 필수."""
+    """UserBot(Pyrogram) 기반 전체 발송. SESSION_STRING 필수."""
     loaded = get_loaded_message_full()
     if not loaded:
         return "❌ 장전된 메시지가 없습니다. 먼저 영상/이미지+캡션 메시지를 봇에게 보내주세요."
@@ -664,14 +664,14 @@ async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
             "메시지를 다시 보내 재장전해 주세요."
         )
 
-    if not (os.getenv("API_ID") and os.getenv("API_HASH") and os.getenv("PYROGRAM_SESSION")):
+    if not (os.getenv("API_ID") and os.getenv("API_HASH") and os.getenv("SESSION_STRING")):
         return (
             "❌ UserBot 환경변수가 설정되지 않았습니다.\n\n"
             "Railway Variables에 아래 3가지를 추가하세요:\n"
             "• API_ID\n"
             "• API_HASH\n"
-            "• PYROGRAM_SESSION\n\n"
-            "세션 생성: python scripts/gen_session.py"
+            "• SESSION_STRING\n\n"
+            "세션 생성: python scripts/generate_session.py"
         )
 
     if not (os.getenv("DATABASE_URL") or "").strip():
@@ -719,17 +719,21 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         status = f"✅ 장전됨 ({ftype}) — 캡션: {cap[:40] + '...' if len(cap) > 40 else cap or '없음'}"
     else:
         status = "⚠️ 장전된 메시지 없음"
-    chunk = int(os.getenv("BROADCAST_CHUNK_SIZE", "50"))
-    sleep = float(os.getenv("BROADCAST_SLEEP_SEC", "15"))
-    userbot_ok = bool(os.getenv("API_ID") and os.getenv("API_HASH") and os.getenv("PYROGRAM_SESSION"))
+    userbot_ok = bool(os.getenv("API_ID") and os.getenv("API_HASH") and os.getenv("SESSION_STRING"))
+    delay_min  = float(os.getenv("USER_DELAY_MIN",   "3"))
+    delay_max  = float(os.getenv("USER_DELAY_MAX",   "7"))
+    brk_every  = int(  os.getenv("LONG_BREAK_EVERY", "50"))
+    brk_min    = float(os.getenv("LONG_BREAK_MIN",   "300")) / 60
+    brk_max    = float(os.getenv("LONG_BREAK_MAX",   "600")) / 60
     text = (
         "📌 <b>UserBot 발송 (Pyrogram)</b>\n\n"
         "1️⃣ <b>장전</b>: 이 채팅에 영상 또는 이미지(캡션 가능)를 보내면 자동 장전.\n"
         "2️⃣ <b>발사</b>: 아래 버튼 → UserBot이 PostgreSQL <code>is_sent=FALSE</code> 유저 전체에 발송.\n"
         "   • VIP CASINO 버튼 자동 첨부\n"
-        f"   • {chunk}명 단위 청크 / {sleep:.0f}초 쿨타임\n"
+        f"   • DM 간격: {delay_min:.0f}~{delay_max:.0f}초 랜덤 (스팸 방어)\n"
+        f"   • {brk_every}명마다 {brk_min:.0f}~{brk_max:.0f}분 장기 휴식\n"
         "   • 차단·탈퇴 유저 자동 건너뜀\n\n"
-        f"UserBot 상태: {'✅ 연결 가능' if userbot_ok else '❌ 환경변수 미설정 (API_ID/API_HASH/PYROGRAM_SESSION)'}\n"
+        f"UserBot 상태: {'✅ 연결 가능' if userbot_ok else '❌ 환경변수 미설정 (API_ID/API_HASH/SESSION_STRING)'}\n"
         f"장전 상태: {status}\n\n"
         "미리보기: /test_post"
     )
