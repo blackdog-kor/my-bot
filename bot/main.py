@@ -14,6 +14,9 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = (os.getenv("CHANNEL_ID") or "").strip()
 
+# 레일에서 CHANNEL_ID가 실제로 로드되는지 확인용 (값은 끝 4자리만)
+_CHANNEL_ID_DBG = "설정됨(끝4자리:%s)" % CHANNEL_ID[-4:] if len(CHANNEL_ID) >= 4 else ("미설정(길이=%s)" % len(CHANNEL_ID))
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -38,6 +41,7 @@ def _run_channel_post_once() -> None:
 
 
 def main() -> None:
+    logger.info("기동 시 env: CHANNEL_ID=%s", _CHANNEL_ID_DBG)
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN이 설정되지 않았습니다. .env 파일을 확인해주세요.")
         return
