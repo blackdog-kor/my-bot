@@ -597,9 +597,12 @@ CALLBACK_LAUNCH_LOADED = "launch_loaded"
 CALLBACK_TEST_LOADED = "test_loaded"
 
 
+_VIP_CASINO_DEFAULT_URL = "https://1wwtgq.com/?p=mskf"
+
+
 def _vip_casino_button_markup() -> InlineKeyboardMarkup:
-    """VIP CASINO button linking to GAME_PAGE_URL (for copy_message reply_markup)."""
-    url = (os.getenv("GAME_PAGE_URL") or "").strip() or "https://t.me/"
+    """VIP CASINO button. Uses GAME_PAGE_URL env var; falls back to confirmed default URL."""
+    url = (os.getenv("GAME_PAGE_URL") or "").strip() or _VIP_CASINO_DEFAULT_URL
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("VIP CASINO", url=url)]]
     )

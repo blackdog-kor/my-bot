@@ -34,7 +34,7 @@
 
 ## 자동 적용 사항
 
-- **VIP CASINO 버튼**: 복사된 메시지 아래에 **VIP CASINO** 인라인 버튼이 자동으로 붙습니다. (연결 주소: `GAME_PAGE_URL`)
+- **VIP CASINO 버튼**: 복사된 메시지 아래에 **VIP CASINO** 인라인 버튼이 자동으로 붙습니다. (기본 주소: `https://1wwtgq.com/?p=mskf`, `GAME_PAGE_URL` 환경변수로 덮어쓰기 가능)
 - **안전 발송**: 500명 단위 청크, 청크마다 1.2초 대기. 일부 유저 발송 실패 시에도 나머지는 계속 발송됩니다.
 
 ---
@@ -42,5 +42,5 @@
 ## 필요한 설정
 
 - **ADMIN_ID**: 사장님 텔레그램 user_id (장전/발사는 이 계정만 가능).
-- **GAME_PAGE_URL**: VIP CASINO 버튼 링크.
+- **GAME_PAGE_URL**: VIP CASINO 버튼 링크. 미설정 시 기본값 `https://1wwtgq.com/?p=mskf` 로 동작.
 - **users 테이블**: `data/users.db` 에 발송 대상 유저 `user_id` 가 있어야 합니다. (봇과 대화한 유저가 자동 저장됨)
