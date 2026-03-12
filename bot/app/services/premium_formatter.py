@@ -1,9 +1,10 @@
 """
-봇 전용: 채널 자동 포스팅만 담당 (유저 DM은 automation에서 채널 게시물 활용).
-- 최상단: ( viP cAsiNo cLub ) + 봇 링크 (HTML)
-- 메인 이미지: bot/assets/casino_images/ 랜덤 선택
-- 본문: EVENT_PAGE_URL + PROMO_PAGE_URL 스크래핑 → Gemini 3줄 요약 + 이모지
-- 프로모 코드: <code> 클릭 복사, 하단 버튼 (vip 카지노 입장)
+Channel-only auto-posting (user DM is handled by automation using channel posts).
+Layout:
+- Line 1: viP cAsiNo club as bot hyperlink (no emoji).
+- Body: Promo/event page summary with bot emojis (🎰 💎 🔥 ✨ 🎁) at the start.
+- One blank line, then "promo code XXXXXX".
+- Inline button: vip 카지노 입장 (no parentheses).
 """
 from __future__ import annotations
 
@@ -21,10 +22,13 @@ logger = logging.getLogger(__name__)
 _BOT_ROOT = Path(__file__).resolve().parents[2]
 CASINO_IMAGES_DIR = _BOT_ROOT / "assets" / "casino_images"
 
-PROMO_SUMMARY_PROMPT = """다음은 카지노/베팅 프로모션 페이지에서 가져온 텍스트입니다.
-이 내용을 3줄 이내로 핵심만 요약해 주세요.
-요약문에는 가독성을 위해 이모지(🎰 💎 🔥 ✨ 🎁 등)를 적절히 1~2개 넣어 주세요.
-한국어로만 출력하고, 다른 설명은 하지 마세요.
+# Same emoji set as bot (content.json / callbacks): use at start of body text.
+BOT_EMOJI_PREFIX = "🎰 "
+
+PROMO_SUMMARY_PROMPT = """Below is text scraped from a casino/betting promo or event page.
+Summarize it in at most 3 short lines. Write in English only.
+Place 1 or 2 emojis from this set at the very beginning of your reply: 🎰 💎 🔥 ✨ 🎁
+Output only the summary (emoji + text), no extra explanation.
 
 ---
 {raw_content}
@@ -40,10 +44,11 @@ def _bot_start_link(start_param: str = "promo") -> str:
 
 
 def _summarize_promo_with_gemini(raw_content: str) -> str:
-    """Gemini로 3줄 이내 요약 + 이모지 (레일 환경변수 GEMINI_API_KEY 활용)."""
+    """Summarize promo/event content in English with emoji at start (GEMINI_API_KEY)."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    fallback = BOT_EMOJI_PREFIX + "VIP events await. Join now!"
     if not api_key:
-        return "🎰 VIP 이벤트가 기다립니다. 지금 참여하세요!"
+        return fallback
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
@@ -51,10 +56,16 @@ def _summarize_promo_with_gemini(raw_content: str) -> str:
         text = (raw_content or "")[:8000]
         prompt = PROMO_SUMMARY_PROMPT.format(raw_content=text)
         response = client.models.generate_content(model=model, contents=prompt)
-        return (response.text or "🎰 VIP 이벤트가 기다립니다.").strip()
+        out = (response.text or "").strip()
+        if not out:
+            return fallback
+        # Ensure body starts with a bot emoji if Gemini omitted it
+        if out[0] not in "🎰💎🔥✨🎁":
+            out = BOT_EMOJI_PREFIX + out
+        return out
     except Exception as e:
-        logger.warning("Gemini 요약 실패: %s", e)
-        return "🎰 VIP 이벤트가 기다립니다. 지금 참여하세요!"
+        logger.warning("Gemini summary failed: %s", e)
+        return fallback
 
 
 def get_promo_page_content(url: str) -> str:
@@ -103,28 +114,29 @@ def get_random_casino_image_path() -> str | None:
 
 
 def build_premium_caption(promo_summary: str, promo_code: str, bot_link: str) -> str:
-    """HTML 캡션: ( viP cAsiNo cLub ) + 봇 링크, 본문, <code>프로모코드</code>."""
+    """Caption: line 1 = viP cAsiNo club (bot link), body with emoji, blank line, promo code line."""
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    top = f'( viP cAsiNo cLub ) — <a href="{esc(bot_link)}">봇 접속</a>'
-    body = (promo_summary or "🎰 VIP 이벤트가 기다립니다.").strip()
-    code_line = f'<code>{esc(promo_code or "PROMO")}</code>'
-    return f"{top}\n\n{body}\n\n{code_line}"
+    line1 = f'<a href="{esc(bot_link)}">viP cAsiNo club</a>'
+    body = (promo_summary or (BOT_EMOJI_PREFIX + "VIP events await. Join now!")).strip()
+    code_val = (promo_code or "PROMO").strip()
+    code_line = f"promo code <code>{esc(code_val)}</code>"
+    return f"{line1}\n\n{body}\n\n{code_line}"
 
 
 def build_premium_keyboard(game_page_url: str) -> InlineKeyboardMarkup:
-    """하단 인라인 버튼: (vip 카지노 입장) → 게임 페이지."""
+    """Inline button below post: vip 카지노 입장 (no parentheses) -> game page."""
     url = (game_page_url or "").strip() or "https://t.me/"
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("(vip 카지노 입장)", url=url)]]
+        [[InlineKeyboardButton("vip 카지노 입장", url=url)]]
     )
 
 
 async def post_premium_to_channel(bot) -> bool:
     """
-    채널(CHANNEL_ID)에 프리미엄 게시물 1건 전송.
-    EVENT_PAGE_URL + PROMO_PAGE_URL 스크래핑 → Gemini 요약 → 랜덤 이미지 + 캡션 + 버튼.
+    Send one premium post to channel (CHANNEL_ID).
+    Scrapes EVENT_PAGE_URL + PROMO_PAGE_URL → Gemini summary → random image + caption + button.
     """
     channel_id = (os.getenv("CHANNEL_ID") or "").strip()
     if not channel_id:
