@@ -55,6 +55,8 @@ def main() -> None:
         scheduler = BackgroundScheduler()
         scheduler.add_job(_run_channel_post_once, "interval", hours=1, id="channel_hourly")
         scheduler.start()
+    else:
+        logger.warning("CHANNEL_ID 미설정 — 채널 자동 발송 비활성화. Railway bot 서비스 Variables에 CHANNEL_ID(-100...) 추가 후 재배포하세요.")
 
     print("--- 텔레그램 봇이 Polling 모드로 시작되었습니다! ---")
     application.run_polling(drop_pending_updates=True)
