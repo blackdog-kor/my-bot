@@ -23,8 +23,12 @@ logger = logging.getLogger(__name__)
 
 def _run_channel_post_once() -> None:
     """스케줄러/기동 시 채널에 프리미엄 게시물 1건 전송 (별도 스레드에서 asyncio.run)."""
-    if not CHANNEL_ID or not BOT_TOKEN:
+    if not BOT_TOKEN:
         return
+    if not CHANNEL_ID:
+        logger.warning("CHANNEL_ID 미설정 — 채널 전송 비활성화. 레일 변수에 CHANNEL_ID(-100...) 추가 후 재배포하세요.")
+        return
+    logger.info("채널 게시물 1건 전송 시도 중...")
     try:
         from app.services.premium_formatter import post_premium_to_channel
         bot = Bot(token=BOT_TOKEN)

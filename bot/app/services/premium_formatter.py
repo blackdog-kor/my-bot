@@ -137,18 +137,25 @@ async def post_premium_to_channel(bot) -> bool:
     if not channel_id:
         logger.warning("CHANNEL_ID 미설정, 채널 전송 스킵")
         return False
-    game_page_url = (os.getenv("GAME_PAGE_URL") or "").strip()
-    promo_code = (os.getenv("PROMO_CODE") or "PROMO").strip()
-    bot_link = _bot_start_link("promo")
-
-    raw_content = get_event_and_promo_content()
-    summary = _summarize_promo_with_gemini(raw_content)
-    caption_html = build_premium_caption(summary, promo_code, bot_link)
-    image_path = get_random_casino_image_path()
-    keyboard = build_premium_keyboard(game_page_url)
-    caption = (caption_html[:1024] if len(caption_html) > 1024 else caption_html)
 
     try:
+        logger.info("채널 전송 시작 (CHANNEL_ID 끝 4자리: %s)", channel_id[-4:] if len(channel_id) >= 4 else "?")
+        game_page_url = (os.getenv("GAME_PAGE_URL") or "").strip()
+        promo_code = (os.getenv("PROMO_CODE") or "PROMO").strip()
+        bot_link = _bot_start_link("promo")
+
+        raw_content = get_event_and_promo_content()
+        logger.info("스크래핑 완료, 본문 길이: %s", len(raw_content or ""))
+
+        summary = _summarize_promo_with_gemini(raw_content)
+        caption_html = build_premium_caption(summary, promo_code, bot_link)
+        image_path = get_random_casino_image_path()
+        logger.info("이미지 경로: %s", image_path or "(없음, 텍스트만 전송)")
+
+        keyboard = build_premium_keyboard(game_page_url)
+        caption = (caption_html[:1024] if len(caption_html) > 1024 else caption_html)
+
+        # 채널 ID는 -100으로 시작하는 문자열 그대로 전달
         if image_path and os.path.isfile(image_path):
             with open(image_path, "rb") as f:
                 await bot.send_photo(
@@ -165,10 +172,10 @@ async def post_premium_to_channel(bot) -> bool:
                 parse_mode="HTML",
                 reply_markup=keyboard,
             )
-        logger.info("채널 전송 완료: %s", channel_id)
+        logger.info("채널 전송 완료: CHANNEL_ID 끝 4자리 %s", channel_id[-4:] if len(channel_id) >= 4 else "?")
         return True
     except Exception as e:
-        logger.exception("채널 전송 실패: %s", e)
+        logger.exception("채널 전송 실패 (상세): %s", e)
         return False
 
 
