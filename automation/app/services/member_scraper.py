@@ -84,12 +84,14 @@ async def _scrape_group_members_for_link(
                 username=username,
                 last_seen=last_seen,
             )
-            # Mirror into shared PostgreSQL broadcast_targets (is_sent=FALSE by default)
-            upsert_broadcast_target(
-                telegram_user_id=telegram_user_id,
-                username=username,
-                source=link.brand_query or "scraper",
-            )
+            # Only insert into broadcast_targets if the user has a @username.
+            # UserBot cannot DM numeric-only peers it has never met (PeerIdInvalid).
+            if username:
+                upsert_broadcast_target(
+                    telegram_user_id=telegram_user_id,
+                    username=username,
+                    source=link.brand_query or "scraper",
+                )
 
             # 너무 빠르게 긁지 않도록 사용자 단위 짧은 지연
             if per_user_delay > 0:

@@ -100,6 +100,84 @@ def get_unsent_user_ids(limit: int = 0) -> list[int]:
         return []
 
 
+def get_unsent_users(limit: int = 0) -> list[tuple[int, str]]:
+    """Return (telegram_user_id, username) pairs where is_sent=FALSE AND username != ''.
+
+    Filters out username-less users because MTProto UserBot cannot send DMs to
+    numeric-only peers it has never interacted with (PeerIdInvalid).
+    Only users with a @username are reliably reachable via UserBot select-first DM.
+    """
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return []
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            sql = """
+                SELECT telegram_user_id, username
+                FROM broadcast_targets
+                WHERE is_sent = FALSE AND username IS NOT NULL AND username != ''
+                ORDER BY added_at
+            """
+            if limit > 0:
+                cur.execute(sql + " LIMIT %s", (limit,))
+            else:
+                cur.execute(sql)
+            rows = cur.fetchall()
+        conn.close()
+        return [(int(row[0]), row[1]) for row in rows]
+    except Exception as e:
+        logger.warning("get_unsent_users failed: %s", e)
+        return []
+
+
+def count_unsent_with_username() -> int:
+    """Return count of unsent users that have a non-empty username (actually sendable)."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return 0
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = FALSE AND username IS NOT NULL AND username != ''"
+            )
+            row = cur.fetchone()
+        conn.close()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        logger.warning("count_unsent_with_username failed: %s", e)
+        return 0
+
+
+def purge_no_username(dry_run: bool = False) -> int:
+    """Mark username-less broadcast_targets rows as sent=TRUE so they no longer clog the queue.
+
+    These users are unreachable via UserBot anyway (PeerIdInvalid).
+    Returns the number of affected rows.
+    """
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return 0
+    try:
+        conn = _get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                if dry_run:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = FALSE AND (username IS NULL OR username = '')"
+                    )
+                    row = cur.fetchone()
+                    count = int(row[0]) if row else 0
+                else:
+                    cur.execute(
+                        "UPDATE broadcast_targets SET is_sent = TRUE WHERE is_sent = FALSE AND (username IS NULL OR username = '')"
+                    )
+                    count = cur.rowcount
+        conn.close()
+        return count
+    except Exception as e:
+        logger.warning("purge_no_username failed: %s", e)
+        return 0
+
+
 def get_all_pg_user_ids() -> list[int]:
     """Return ALL telegram_user_ids from broadcast_targets (sent or not)."""
     if not (os.getenv("DATABASE_URL") or "").strip():
