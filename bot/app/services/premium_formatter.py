@@ -1,10 +1,8 @@
 """
 Channel-only auto-posting (user DM is handled by automation using channel posts).
-Layout:
-- Line 1: viP cAsiNo club as bot hyperlink (no emoji).
-- Body: Promo/event page summary with bot emojis (🎰 💎 🔥 ✨ 🎁) at the start.
-- One blank line, then "promo code XXXXXX".
-- Inline button: vip 카지노 입장 (no parentheses).
+Layout (like reference: link above image, then image + caption + button):
+- First message (above image): single line = viP cAsiNo club as bot hyperlink (BOT_USERNAME), no emoji.
+- Second message: image + caption (body 3 lines + promo code) + inline button in English.
 """
 from __future__ import annotations
 
@@ -22,14 +20,16 @@ logger = logging.getLogger(__name__)
 _BOT_ROOT = Path(__file__).resolve().parents[2]
 CASINO_IMAGES_DIR = _BOT_ROOT / "assets" / "casino_images"
 
-# Same emoji set as bot (content.json / callbacks): use at start of body text.
 BOT_EMOJI_PREFIX = "🎰 "
 
-PROMO_SUMMARY_PROMPT = """Below is text scraped from a casino/betting promo or event page.
-Summarize it in at most 3 short lines. Write in English only.
-Place 1 or 2 emojis from this set at the very beginning of your reply: 🎰 💎 🔥 ✨ 🎁
-Output only the summary (emoji + text), no extra explanation.
+PROMO_SUMMARY_PROMPT = """You are summarizing a casino/betting promo or event page for a short channel post.
+Rules:
+- Output exactly 2 or 3 short lines in English. No bullet list, no extra intro.
+- Put 1 or 2 emojis from this set at the very start: 🎰 💎 🔥 ✨ 🎁
+- Focus on: main offer, key bonus/event, and one clear CTA (e.g. join now, claim bonus).
+- No hashtags, no "click here", no repetition. Output only the summary.
 
+Content:
 ---
 {raw_content}
 ---
@@ -37,7 +37,7 @@ Output only the summary (emoji + text), no extra explanation.
 
 
 def _bot_start_link(start_param: str = "promo") -> str:
-    username = os.getenv("BOT_USERNAME", "").strip()
+    username = (os.getenv("BOT_USERNAME") or "").strip().lstrip("@")
     if username:
         return f"https://t.me/{username}?start={start_param}"
     return "https://t.me/"
@@ -113,23 +113,28 @@ def get_random_casino_image_path() -> str | None:
     return str(random.choice(files))
 
 
-def build_premium_caption(promo_summary: str, promo_code: str, bot_link: str) -> str:
-    """Caption: line 1 = viP cAsiNo club (bot link), body with emoji, blank line, promo code line."""
-    def esc(s: str) -> str:
-        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def _html_esc(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    line1 = f'<a href="{esc(bot_link)}">viP cAsiNo club</a>'
+
+def build_header_message(bot_link: str) -> str:
+    """Single line for the message above the image: viP cAsiNo club as clickable link (BOT_USERNAME)."""
+    return f'<a href="{_html_esc(bot_link)}">viP cAsiNo club</a>'
+
+
+def build_premium_caption(promo_summary: str, promo_code: str) -> str:
+    """Caption under the image only: body (2–3 lines) + blank line + promo code line. No link line."""
     body = (promo_summary or (BOT_EMOJI_PREFIX + "VIP events await. Join now!")).strip()
     code_val = (promo_code or "PROMO").strip()
-    code_line = f"promo code <code>{esc(code_val)}</code>"
-    return f"{line1}\n\n{body}\n\n{code_line}"
+    code_line = f"promo code <code>{_html_esc(code_val)}</code>"
+    return f"{body}\n\n{code_line}"
 
 
 def build_premium_keyboard(game_page_url: str) -> InlineKeyboardMarkup:
-    """Inline button below post: vip 카지노 입장 (no parentheses) -> game page."""
+    """Inline button below post: English label -> game page."""
     url = (game_page_url or "").strip() or "https://t.me/"
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("vip 카지노 입장", url=url)]]
+        [[InlineKeyboardButton("Enter VIP Casino", url=url)]]
     )
 
 
@@ -148,19 +153,29 @@ async def post_premium_to_channel(bot) -> bool:
         game_page_url = (os.getenv("GAME_PAGE_URL") or "").strip()
         promo_code = (os.getenv("PROMO_CODE") or "PROMO").strip()
         bot_link = _bot_start_link("promo")
+        if not (os.getenv("BOT_USERNAME") or "").strip():
+            logger.warning("BOT_USERNAME not set — bot link above image may not open the correct bot. Set it in Railway Variables.")
 
         raw_content = get_event_and_promo_content()
         logger.info("스크래핑 완료, 본문 길이: %s", len(raw_content or ""))
 
         summary = _summarize_promo_with_gemini(raw_content)
-        caption_html = build_premium_caption(summary, promo_code, bot_link)
+        caption_html = build_premium_caption(summary, promo_code)
         image_path = get_random_casino_image_path()
         logger.info("이미지 경로: %s", image_path or "(없음, 텍스트만 전송)")
 
         keyboard = build_premium_keyboard(game_page_url)
         caption = (caption_html[:1024] if len(caption_html) > 1024 else caption_html)
 
-        # 채널 ID는 -100으로 시작하는 문자열 그대로 전달
+        # 1) Message above image: bot link only (viP cAsiNo club -> BOT_USERNAME)
+        header_html = build_header_message(bot_link)
+        await bot.send_message(
+            chat_id=channel_id,
+            text=header_html,
+            parse_mode="HTML",
+        )
+
+        # 2) Image + caption (body + promo code) + inline button
         if image_path and os.path.isfile(image_path):
             with open(image_path, "rb") as f:
                 await bot.send_photo(
