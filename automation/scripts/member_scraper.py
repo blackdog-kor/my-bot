@@ -16,9 +16,12 @@
 
 필요 환경변수 (bot/.env):
   SESSION_STRING  – Pyrogram 세션 문자열
-  API_ID          – 기본값 내장
-  API_HASH        – 기본값 내장
+  API_ID / API_HASH – 기본값 내장
   DATABASE_URL    – PostgreSQL 연결 문자열
+
+진행 알림 (선택):
+  BOT_TOKEN + ADMIN_ID 를 .env에 넣으면 채굴 시작/그룹 완료/전체 완료 시
+  해당 채팅으로 텔레그램 알림이 전송됩니다.
 
 EXTRA_GROUPS: 직접 아는 그룹을 추가하면 자동 발굴 결과에 합산됩니다.
 """
@@ -60,6 +63,8 @@ API_ID         = int(os.getenv("API_ID", "37398454"))
 API_HASH       = os.getenv("API_HASH", "a73350e09f51f516d8eac08498967750")
 SESSION_STRING = os.getenv("SESSION_STRING", "")
 DATABASE_URL   = os.getenv("DATABASE_URL", "")
+BOT_TOKEN      = (os.getenv("BOT_TOKEN") or "").strip()
+ADMIN_ID       = (os.getenv("ADMIN_ID") or "").strip()  # 채굴 진행 알림 받을 채팅 ID
 
 # ── 검색 타겟 쿼리 목록 (자동 발굴 범위) ──────────────────────────────────────
 SEARCH_QUERIES = [
@@ -99,6 +104,27 @@ _USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 ]
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 텔레그램 진행 알림 (BOT_TOKEN + ADMIN_ID 설정 시에만 동작)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _telegram_notify(text: str) -> None:
+    """관리자(ADMIN_ID)에게 텔레그램 메시지 전송. 실패 시 무시."""
+    if not BOT_TOKEN or not ADMIN_ID:
+        return
+    text = (text or "")[:4000]  # API 제한
+    try:
+        with httpx.Client(timeout=10) as hc:
+            r = hc.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={"chat_id": ADMIN_ID, "text": text, "disable_web_page_preview": True},
+            )
+            if r.status_code != 200:
+                pass  # 로그만 생략
+    except Exception:
+        pass
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -234,20 +260,33 @@ def ensure_table(conn) -> None:
 
 
 def save_batch(conn, batch: list[tuple[int, str, str]]) -> int:
-    """중복 무시(ON CONFLICT DO NOTHING). 새로 삽입된 행 수 반환."""
+    """username 자동 보정 포함 배치 저장.
+
+    - 신규 유저: INSERT
+    - 기존 유저:
+        • 기존 username이 비어 있거나(NULL/''), 새 username과 다르면 → UPDATE로 username/source 갱신
+        • 이미 username이 동일하면 아무 작업 안 함
+    """
     if not batch:
         return 0
-    inserted = 0
+    inserted_or_updated = 0
     with conn:
         with conn.cursor() as cur:
             for uid, username, source in batch:
                 cur.execute("""
                     INSERT INTO broadcast_targets (telegram_user_id, username, source)
                     VALUES (%s, %s, %s)
-                    ON CONFLICT (telegram_user_id) DO NOTHING
+                    ON CONFLICT (telegram_user_id) DO UPDATE
+                    SET
+                        username = EXCLUDED.username,
+                        source   = EXCLUDED.source
+                    WHERE
+                        broadcast_targets.username IS NULL
+                        OR broadcast_targets.username = ''
+                        OR broadcast_targets.username <> EXCLUDED.username
                 """, (uid, username, source))
-                inserted += cur.rowcount
-    return inserted
+                inserted_or_updated += cur.rowcount
+    return inserted_or_updated
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -344,6 +383,12 @@ async def main():
 
     print(f"\n📋 총 {len(all_groups)}개 그룹에서 멤버 수집 시작합니다.")
 
+    _telegram_notify(
+        "🔍 채굴(멤버 수집) 시작\n"
+        f"• 발굴된 그룹: {len(all_groups)}개\n"
+        f"• 목록: {', '.join(all_groups[:10])}{'...' if len(all_groups) > 10 else ''}"
+    )
+
     # ── Phase 2~4: Pyrogram 수집 + DB 저장 ───────────────────────────────────
     conn = _get_conn()
     ensure_table(conn)
@@ -364,15 +409,30 @@ async def main():
                 total_saved   += s
                 total_skipped += sk
                 ok_groups += 1
+                _telegram_notify(
+                    f"📤 그룹 완료 ({i+1}/{len(all_groups)})\n"
+                    f"• {handle} → 신규 저장 {s}명 / 건너뜀 {sk}명\n"
+                    f"• 누적 저장: {total_saved}명"
+                )
             except Exception as e:
                 print(f"  ❌ [{handle}] 처리 실패: {e}")
                 fail_groups += 1
+                _telegram_notify(f"❌ 그룹 실패 [{handle}]\n{type(e).__name__}: {e}")
 
             if i < len(all_groups) - 1:
                 print(f"  ⏳ 다음 그룹까지 {PER_GROUP_DELAY_SEC:.0f}초 대기...")
                 await asyncio.sleep(PER_GROUP_DELAY_SEC)
 
     conn.close()
+
+    summary = (
+        f"🎉 채굴(멤버 수집) 완료!\n"
+        f"• 처리 그룹: 성공 {ok_groups}개 / 실패 {fail_groups}개\n"
+        f"• 신규 저장: {total_saved}명 → Railway PG\n"
+        f"• 건너뜀: {total_skipped}명\n"
+        f"▶ 발송: 봇 /admin → 🚀 장전된 메시지 발사"
+    )
+    _telegram_notify(summary)
 
     print()
     print("=" * 62)
