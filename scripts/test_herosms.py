@@ -5,9 +5,10 @@ HeroSMS API 엔드포인트 테스트 스크립트 (Cloudflare 우회용 cloudsc
 환경변수:
   - HERO_SMS_API_KEY
 
-테스트할 URL:
-1. https://hero-sms.com/api?api_key={key}&action=getBalance
-2. https://hero-sms.com/api?api_key={key}&action=getNumbersStatus&service=tg&country=0
+테스트할 URL (handler_api.php):
+1. https://hero-sms.com/stubs/handler_api.php?api_key={key}&action=getBalance
+2. https://hero-sms.com/stubs/handler_api.php?api_key={key}&action=getNumbersStatus&service=tg&country=0
+3. https://hero-sms.com/stubs/handler_api.php?api_key={key}&action=getNumber&service=tg&country=7
 """
 
 import os
@@ -26,9 +27,11 @@ def main() -> None:
         browser={"browser": "chrome", "platform": "windows", "mobile": False}
     )
 
+    base = "https://hero-sms.com/stubs/handler_api.php"
     urls = [
-        f"https://hero-sms.com/api?api_key={api_key}&action=getBalance",
-        f"https://hero-sms.com/api?api_key={api_key}&action=getNumbersStatus&service=tg&country=0",
+        f"{base}?api_key={api_key}&action=getBalance",
+        f"{base}?api_key={api_key}&action=getNumbersStatus&service=tg&country=0",
+        f"{base}?api_key={api_key}&action=getNumber&service=tg&country=7",
     ]
 
     for i, url in enumerate(urls, start=1):
