@@ -104,12 +104,12 @@ async def hero_buy_number(client: httpx.AsyncClient) -> Optional[Tuple[str, str]
         return None
     try:
         r = await client.get(
-            "https://hero-sms.com/api/v1/",
+            "https://hero-sms.com/stubs/handler.php",
             params={
                 "api_key": HERO_API_KEY,
                 "action": "getNumber",
                 "service": "tg",
-                "country": 22,
+                "country": 2,
             },
             timeout=20,
         )
@@ -136,11 +136,12 @@ async def hero_cancel_number(client: httpx.AsyncClient, req_id: str) -> None:
         return
     try:
         await client.get(
-            "https://hero-sms.com/api/v1/",
+            "https://hero-sms.com/stubs/handler.php",
             params={
                 "api_key": HERO_API_KEY,
-                "action": "cancelNumber",
+                "action": "setStatus",
                 "id": req_id,
+                "status": 8,
             },
             timeout=10,
         )
@@ -158,7 +159,7 @@ async def hero_wait_code(client: httpx.AsyncClient, req_id: str, timeout_sec: in
     while asyncio.get_event_loop().time() < deadline:
         try:
             r = await client.get(
-                "https://hero-sms.com/api/v1/",
+                "https://hero-sms.com/stubs/handler.php",
                 params={
                     "api_key": HERO_API_KEY,
                     "action": "getStatus",
@@ -191,11 +192,12 @@ async def hero_list_countries() -> None:
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.get(
-                "https://hero-sms.com/api/v1/",
+                "https://hero-sms.com/stubs/handler.php",
                 params={
                     "api_key": HERO_API_KEY,
-                    "action": "getCountries",
-                    "service": "tg",
+                    "action": "getNumbersStatus",
+                    "country": 0,
+                    "operator": "any",
                 },
             )
             data = r.json()
