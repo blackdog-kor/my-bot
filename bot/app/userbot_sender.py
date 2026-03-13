@@ -54,6 +54,8 @@ LONG_BREAK_MIN   = float(os.getenv("LONG_BREAK_MIN",   "300"))   # 5 min
 LONG_BREAK_MAX   = float(os.getenv("LONG_BREAK_MAX",   "600"))   # 10 min
 
 VIP_URL = os.getenv("VIP_URL", "https://1wwtgq.com/?p=mskf")
+AFFILIATE_URL = (os.getenv("AFFILIATE_URL") or "").strip()
+TRACKING_SERVER_URL = (os.getenv("TRACKING_SERVER_URL") or "").rstrip("/")
 
 
 async def _download_via_bot_api(bot_token: str, file_id: str) -> tuple[bytes, str]:
@@ -113,6 +115,7 @@ async def broadcast_via_userbot(
         count_unsent_with_username,
         mark_sent,
         purge_no_username,
+        generate_unique_ref,
     )
 
     api_id   = int(os.getenv("API_ID", "0") or "0")
@@ -186,6 +189,9 @@ async def broadcast_via_userbot(
                 f"• {LONG_BREAK_EVERY}명마다 {LONG_BREAK_MIN/60:.0f}~{LONG_BREAK_MAX/60:.0f}분 휴식"
             )
 
+        # precompute base tracking server URL
+        base_track_url = TRACKING_SERVER_URL or ""
+
         # ── Step 3: Send to all unsent users with username ────────────────────
         batch_done: list[int] = []
 
@@ -206,6 +212,23 @@ async def broadcast_via_userbot(
                     continue
 
                 target = f"@{username_clean}"
+                tracking_url = None
+                # Per-user unique tracking ref 및 캡션 치환
+                try:
+                    if base_track_url and AFFILIATE_URL:
+                        ref = generate_unique_ref(uid)
+                        if ref:
+                            tracking_url = f"{base_track_url}/track/{ref}"
+                except Exception as e:
+                    logger.warning("generate_unique_ref failed for %s: %s", uid, e)
+
+                if tracking_url and AFFILIATE_URL:
+                    try:
+                        user_caption = (caption or "").replace(AFFILIATE_URL, tracking_url)
+                    except Exception:
+                        user_caption = caption
+                else:
+                    user_caption = caption
                 delivered = False
 
                 for attempt in range(2):
@@ -214,6 +237,7 @@ async def broadcast_via_userbot(
                             chat_id=target,
                             from_chat_id="me",
                             message_id=saved_msg_id,
+                            caption=user_caption,
                             reply_markup=keyboard,
                         )
                         sent += 1

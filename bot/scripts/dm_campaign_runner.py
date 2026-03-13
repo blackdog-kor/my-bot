@@ -44,6 +44,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.userbot_sender import broadcast_via_userbot  # type: ignore
+from app.pg_broadcast import get_campaign_stats  # type: ignore
 
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
@@ -184,6 +185,21 @@ async def main() -> None:
     )
     print(summary)
     await _notify(summary)
+
+    # 캠페인 전체 통계 리포트
+    try:
+        stats = get_campaign_stats()
+        report = (
+            "📊 캠페인 완료 리포트\n"
+            f"총 수집: {stats.get('total_targets', 0)}명\n"
+            f"발송 완료: {stats.get('total_sent', 0)}명\n"
+            f"링크 클릭: {stats.get('total_clicked', 0)}명\n"
+            f"클릭률: {stats.get('click_rate', 0.0)}%\n"
+            f"대기 중: {stats.get('pending', 0)}명"
+        )
+        await _notify(report)
+    except Exception as e:
+        print("캠페인 통계 조회 실패:", e)
 
 
 if __name__ == "__main__":

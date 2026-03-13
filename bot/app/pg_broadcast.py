@@ -16,12 +16,19 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Generator
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
 _DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
+ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 
 
 def _get_conn():
@@ -49,11 +56,24 @@ def ensure_pg_table() -> None:
                         source           TEXT        NOT NULL DEFAULT 'scraper',
                         added_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         is_sent          BOOLEAN     NOT NULL DEFAULT FALSE,
-                        sent_at          TIMESTAMPTZ
+                        sent_at          TIMESTAMPTZ,
+                        clicked_at       TIMESTAMPTZ,
+                        click_count      INTEGER      NOT NULL DEFAULT 0,
+                        unique_ref       TEXT
                     )
                 """)
+                # 기존 테이블에 컬럼이 없다면 추가 (에러는 조용히 무시)
+                for alter_sql in (
+                    "ALTER TABLE broadcast_targets ADD COLUMN clicked_at TIMESTAMPTZ",
+                    "ALTER TABLE broadcast_targets ADD COLUMN click_count INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE broadcast_targets ADD COLUMN unique_ref TEXT",
+                ):
+                    try:
+                        cur.execute(alter_sql)
+                    except Exception:
+                        pass
         conn.close()
-        logger.info("broadcast_targets table ready")
+        logger.info("broadcast_targets table ready (with click tracking columns)")
     except Exception as e:
         logger.warning("ensure_pg_table failed: %s", e)
 
@@ -252,6 +272,131 @@ def count_total() -> int:
     """Return total rows in broadcast_targets."""
     if not (os.getenv("DATABASE_URL") or "").strip():
         return 0
+
+
+def generate_unique_ref(telegram_user_id: int) -> str:
+    """Generate and persist a per-user unique tracking ref."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return ""
+    ref = f"{telegram_user_id}_{int(time.time() * 1000)}"
+    try:
+        conn = _get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE broadcast_targets
+                    SET unique_ref = %s
+                    WHERE telegram_user_id = %s
+                    """,
+                    (ref, telegram_user_id),
+                )
+        conn.close()
+    except Exception as e:
+        logger.warning("generate_unique_ref(%s) failed: %s", telegram_user_id, e)
+    return ref
+
+
+def _notify_click(telegram_user_id: int, username: str, click_count: int, clicked_at: datetime) -> None:
+    """Send a Telegram DM to admin about a click event. Best effort only."""
+    if not BOT_TOKEN or not ADMIN_ID:
+        return
+    text = (
+        "🎯 클릭 발생!\n"
+        f"유저ID: {telegram_user_id}\n"
+        f"username: @{username or '-'}\n"
+        f"클릭횟수: {click_count}회\n"
+        f"시각: {clicked_at.isoformat()}"
+    )
+    try:
+        with httpx.Client(timeout=10) as hc:
+            hc.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_ID,
+                    "text": text,
+                    "disable_web_page_preview": True,
+                },
+            )
+    except Exception as e:
+        logger.warning("click notify failed: %s", e)
+
+
+def mark_clicked(ref: str) -> None:
+    """Increment click_count and set clicked_at for the given unique_ref."""
+    if not ref or not (os.getenv("DATABASE_URL") or "").strip():
+        return
+    try:
+        now = datetime.now(timezone.utc)
+        conn = _get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE broadcast_targets
+                    SET
+                        click_count = COALESCE(click_count, 0) + 1,
+                        clicked_at = %s
+                    WHERE unique_ref = %s
+                    RETURNING telegram_user_id, username, click_count, clicked_at
+                    """,
+                    (now, ref),
+                )
+                row = cur.fetchone()
+        conn.close()
+        if row:
+            telegram_user_id, username, click_count, clicked_at = row
+            _notify_click(int(telegram_user_id), username or "", int(click_count), clicked_at or now)
+    except Exception as e:
+        logger.warning("mark_clicked(%s) failed: %s", ref, e)
+
+
+def get_campaign_stats() -> dict:
+    """Return aggregate campaign statistics."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return {
+            "total_targets": 0,
+            "total_sent": 0,
+            "total_clicked": 0,
+            "click_rate": 0.0,
+            "pending": 0,
+        }
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM broadcast_targets")
+            total_targets = int(cur.fetchone()[0] or 0)
+
+            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = TRUE")
+            total_sent = int(cur.fetchone()[0] or 0)
+
+            cur.execute(
+                "SELECT COUNT(*) FROM broadcast_targets WHERE click_count IS NOT NULL AND click_count > 0"
+            )
+            total_clicked = int(cur.fetchone()[0] or 0)
+
+            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = FALSE")
+            pending = int(cur.fetchone()[0] or 0)
+        conn.close()
+    except Exception as e:
+        logger.warning("get_campaign_stats failed: %s", e)
+        return {
+            "total_targets": 0,
+            "total_sent": 0,
+            "total_clicked": 0,
+            "click_rate": 0.0,
+            "pending": 0,
+        }
+
+    click_rate = (total_clicked / total_sent * 100.0) if total_sent > 0 else 0.0
+    return {
+        "total_targets": total_targets,
+        "total_sent": total_sent,
+        "total_clicked": total_clicked,
+        "click_rate": round(click_rate, 2),
+        "pending": pending,
+    }
+
     try:
         conn = _get_conn()
         with conn.cursor() as cur:

@@ -8,6 +8,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import RedirectResponse
 from telegram import BotCommand, Update
 from telegram.ext import Application
 import uvicorn
@@ -41,6 +42,7 @@ logger = logging.getLogger("uvicorn.error")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 CALLBACK_SECRET = os.getenv("CALLBACK_SECRET", "")
+AFFILIATE_URL = (os.getenv("AFFILIATE_URL") or "").strip()
 
 telegram_app: Application | None = None
 CURRENT_WEBHOOK_URL = ""
@@ -300,6 +302,33 @@ async def webhook_heal():
 
     status = await ensure_webhook()
     return status
+
+
+@app.get("/track/{ref}")
+async def track_click(ref: str):
+    """
+    클릭 트래킹 엔드포인트.
+
+    - ref 기준으로 broadcast_targets.click_count / clicked_at 업데이트
+    - 오류가 나더라도 최종적으로는 AFFILIATE_URL 로 리다이렉트 (유저 경험 보호)
+    """
+    # mark_clicked는 bot 패키지의 pg_broadcast 에 구현되어 있으므로,
+    # 루트에 있는 bot/ 모듈을 통해 import 한다.
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        ROOT = _Path(__file__).resolve().parents[2]
+        if str(ROOT) not in _sys.path:
+            _sys.path.insert(0, str(ROOT))
+        from bot.app.pg_broadcast import mark_clicked  # type: ignore
+
+        mark_clicked(ref)
+    except Exception as e:
+        logger.warning("mark_clicked failed for ref=%s: %s", ref, e)
+
+    target = AFFILIATE_URL or "https://t.me"
+    return RedirectResponse(url=target, status_code=302)
 
 
 @app.post("/telegram/{secret}")
