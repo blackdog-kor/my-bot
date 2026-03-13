@@ -4,6 +4,7 @@ Admin Bot 핸들러: /admin, 장전, 발송, 알림 (통합 구조).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -472,6 +473,15 @@ def _is_admin(user_id: int | None) -> bool:
 CALLBACK_LAUNCH_LOADED = "launch_loaded"
 CALLBACK_TEST_LOADED = "test_loaded"
 
+# 관리자 인라인 메뉴용 콜백 키
+CALLBACK_MENU_SEND = "menu_send"
+CALLBACK_MENU_RETRY = "menu_retry"
+CALLBACK_MENU_LOAD = "menu_load"
+CALLBACK_MENU_HOME = "menu_home"
+CALLBACK_CONFIRM_SEND = "confirm_send"
+CALLBACK_CONFIRM_RETRY = "confirm_retry"
+CALLBACK_CONFIRM_CANCEL = "confirm_cancel"
+
 
 def _vip_casino_button_markup() -> InlineKeyboardMarkup:
     vip_url = os.getenv("VIP_URL", "https://1wwtgq.com/?p=mskf")
@@ -515,39 +525,57 @@ async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
         return f"❌ UserBot 발송 실패:\n{e}"
 
 
+def _admin_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """DM 관련 관리자 메뉴 인라인 키보드."""
+    rows = [
+        [
+            InlineKeyboardButton("📤 DM 발송 실행", callback_data=CALLBACK_MENU_SEND),
+            InlineKeyboardButton("🔄 재발송 실행", callback_data=CALLBACK_MENU_RETRY),
+        ],
+        [
+            InlineKeyboardButton("🎬 미디어 장전", callback_data=CALLBACK_MENU_LOAD),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def _home_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🏠 메인 메뉴", callback_data=CALLBACK_MENU_HOME)]]
+    )
+
+
+async def _run_script_background(script_name: str) -> None:
+    """scripts/{script_name} 를 백그라운드에서 실행."""
+    script_path = ROOT_DIR / "scripts" / script_name
+    if not script_path.is_file():
+        logger.warning("Script not found: %s", script_path)
+        return
+    try:
+        await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script_path),
+            cwd=str(ROOT_DIR),
+            env=os.environ.copy(),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except Exception as e:
+        logger.warning("Failed to start script %s: %s", script_name, e)
+
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.effective_user:
         return
     if not _is_admin(update.effective_user.id):
         await update.message.reply_text("권한이 없습니다.")
         return
-    loaded = get_loaded_message_full()
-    if loaded:
-        _, _, fid, ftype, cap = loaded
-        status = f"✅ 장전됨 ({ftype}) — 캡션: {cap[:40] + '...' if len(cap) > 40 else cap or '없음'}"
-    else:
-        status = "⚠️ 장전된 메시지 없음"
-    userbot_ok = bool(os.getenv("API_ID") and os.getenv("API_HASH") and os.getenv("SESSION_STRING"))
-    delay_min = float(os.getenv("USER_DELAY_MIN", "3"))
-    delay_max = float(os.getenv("USER_DELAY_MAX", "7"))
-    brk_every = int(os.getenv("LONG_BREAK_EVERY", "50"))
-    brk_min = float(os.getenv("LONG_BREAK_MIN", "300")) / 60
-    brk_max = float(os.getenv("LONG_BREAK_MAX", "600")) / 60
-    text = (
-        "📌 <b>UserBot 발송 (Pyrogram)</b>\n\n"
-        "1️⃣ <b>장전</b>: 이 채팅에 영상 또는 이미지(캡션 가능)를 보내면 자동 장전.\n"
-        "2️⃣ <b>발사</b>: 아래 버튼 → UserBot이 PostgreSQL is_sent=FALSE 유저 전체에 발송.\n"
-        f"   • DM 간격: {delay_min:.0f}~{delay_max:.0f}초 랜덤\n"
-        f"   • {brk_every}명마다 {brk_min:.0f}~{brk_max:.0f}분 장기 휴식\n"
-        f"UserBot 상태: {'✅ 연결 가능' if userbot_ok else '❌ 환경변수 미설정'}\n"
-        f"장전 상태: {status}\n\n"
-        "미리보기: /test_post"
+    await update.message.reply_text(
+        "🛠 <b>관리자 메뉴</b>\n\n"
+        "DM 발송 / 재발송 / 미디어 장전을 이 메뉴에서 관리할 수 있습니다.",
+        reply_markup=_admin_main_menu_keyboard(),
+        parse_mode="HTML",
     )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧪 장전된 메시지 테스트 (나에게만)", callback_data=CALLBACK_TEST_LOADED)],
-        [InlineKeyboardButton("🚀 장전된 메시지 발사", callback_data=CALLBACK_LAUNCH_LOADED)],
-    ])
-    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def admin_load_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -594,7 +622,105 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not query:
         return
     await query.answer()
-    if query.data == CALLBACK_TEST_LOADED:
+    data = query.data
+
+    # 관리자 메인 메뉴 / DM 관련 콜백
+    if data == CALLBACK_MENU_HOME:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text(
+            "🏠 메인 메뉴",
+            reply_markup=_admin_main_menu_keyboard(),
+        )
+        return
+
+    if data == CALLBACK_MENU_SEND:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ 확인", callback_data=CALLBACK_CONFIRM_SEND),
+                    InlineKeyboardButton("❌ 취소", callback_data=CALLBACK_CONFIRM_CANCEL),
+                ],
+                [InlineKeyboardButton("🏠 메인 메뉴", callback_data=CALLBACK_MENU_HOME)],
+            ]
+        )
+        await query.message.reply_text(
+            "⚠️ DM 발송을 즉시 실행할까요?", reply_markup=keyboard
+        )
+        return
+
+    if data == CALLBACK_MENU_RETRY:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ 확인", callback_data=CALLBACK_CONFIRM_RETRY),
+                    InlineKeyboardButton("❌ 취소", callback_data=CALLBACK_CONFIRM_CANCEL),
+                ],
+                [InlineKeyboardButton("🏠 메인 메뉴", callback_data=CALLBACK_MENU_HOME)],
+            ]
+        )
+        await query.message.reply_text(
+            "⚠️ 재발송을 즉시 실행할까요?", reply_markup=keyboard
+        )
+        return
+
+    if data == CALLBACK_MENU_LOAD:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        loaded = get_loaded_message_full()
+        if loaded:
+            _, _, _, ftype, cap = loaded
+            msg = (
+                "✅ 현재 장전된 미디어가 있습니다.\n"
+                f"• 타입: {ftype}\n"
+                f"• 캡션: {cap[:80] + '...' if len(cap) > 80 else cap or '(없음)'}\n\n"
+                "새로운 미디어를 이 채팅에 보내면 장전 내용이 교체됩니다."
+            )
+        else:
+            msg = (
+                "❌ 장전된 미디어가 없습니다.\n"
+                "이 채팅에 영상/이미지(+캡션)를 보내면 자동으로 장전됩니다."
+            )
+        await query.message.reply_text(msg, reply_markup=_home_keyboard())
+        return
+
+    if data == CALLBACK_CONFIRM_SEND:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text(
+            "📤 DM 발송 시작됨. 완료 시 알림 드립니다.", reply_markup=_home_keyboard()
+        )
+        await _run_script_background("dm_campaign_runner.py")
+        return
+
+    if data == CALLBACK_CONFIRM_RETRY:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text(
+            "🔄 재발송 시작됨.", reply_markup=_home_keyboard()
+        )
+        await _run_script_background("retry_sender.py")
+        return
+
+    if data == CALLBACK_CONFIRM_CANCEL:
+        if not _is_admin(query.from_user.id if query.from_user else None):
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text("작업을 취소했습니다.", reply_markup=_home_keyboard())
+        return
+
+    # 기존 장전/테스트 콜백
+    if data == CALLBACK_TEST_LOADED:
         if not _is_admin(query.from_user.id if query.from_user else None):
             await query.message.reply_text("권한이 없습니다.")
             return
@@ -616,7 +742,8 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.exception("Test copy_message failed: %s", e)
             await query.message.reply_text(f"❌ 테스트 발송 실패: {e}")
         return
-    if query.data == CALLBACK_LAUNCH_LOADED:
+
+    if data == CALLBACK_LAUNCH_LOADED:
         if not _is_admin(query.from_user.id if query.from_user else None):
             await query.message.reply_text("권한이 없습니다.")
             return
@@ -624,5 +751,6 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         summary = await _broadcast_loaded_message(context.bot, query.message.chat_id)
         await query.message.reply_text(summary)
         return
-    if query.data == "close":
+
+    if data == "close":
         await close_content_post(context, query.message.chat_id)
