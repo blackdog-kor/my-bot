@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 python-telegram-bot[job-queue]
-pyrogram
-tgcrypto
+pyrogram==2.0.106
+tgcrypto==1.2.3
 psycopg2-binary
 APScheduler
 httpx
