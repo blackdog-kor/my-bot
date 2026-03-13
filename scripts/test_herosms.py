@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """
-HeroSMS API 엔드포인트 테스트 스크립트.
+HeroSMS API 엔드포인트 테스트 스크립트 (Cloudflare 우회용 cloudscraper 사용).
 
 환경변수:
   - HERO_SMS_API_KEY
 
-아래 URL들을 모두 호출하고 요청 URL, status_code, 응답 텍스트를 출력합니다.
-
-1. https://hero-sms.com/stubs/handler.php?api_key={key}&action=getBalance
-2. https://hero-sms.com/api/v1/getBalance?api_key={key}
-3. https://hero-sms.com/api?api_key={key}&action=getBalance
-4. https://api.hero-sms.com/v1/?api_key={key}&action=getBalance
+테스트할 URL:
+1. https://hero-sms.com/api?api_key={key}&action=getBalance
+2. https://hero-sms.com/api?api_key={key}&action=getNumbersStatus&service=tg&country=0
 """
 
 import os
 import sys
 
-import requests
+import cloudscraper
 
 
 def main() -> None:
@@ -25,11 +22,13 @@ def main() -> None:
         print("❌ HERO_SMS_API_KEY 환경변수가 설정되지 않았습니다.")
         sys.exit(1)
 
+    scraper = cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "windows", "mobile": False}
+    )
+
     urls = [
-        f"https://hero-sms.com/stubs/handler.php?api_key={api_key}&action=getBalance",
-        f"https://hero-sms.com/api/v1/getBalance?api_key={api_key}",
         f"https://hero-sms.com/api?api_key={api_key}&action=getBalance",
-        f"https://api.hero-sms.com/v1/?api_key={api_key}&action=getBalance",
+        f"https://hero-sms.com/api?api_key={api_key}&action=getNumbersStatus&service=tg&country=0",
     ]
 
     for i, url in enumerate(urls, start=1):
@@ -38,7 +37,7 @@ def main() -> None:
         print(url)
         print("-" * 80)
         try:
-            resp = requests.get(url, timeout=20)
+            resp = scraper.get(url, timeout=20)
             print(f"status_code: {resp.status_code}")
             print("응답 텍스트:")
             print(resp.text)
