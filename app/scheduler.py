@@ -102,6 +102,13 @@ def _job_retry_sender() -> None:
         _notify("🔁 재발송 Job 완료" if ok else "🔁 재발송 Job 실패")
 
 
+def _job_daily_report() -> None:
+    with _job_lock:
+        _notify("📊 일일 KPI 리포트 Job 시작 (daily_report)")
+        ok = _run_script("daily_report.py", "일일 KPI 리포트(daily_report)")
+        _notify("📊 일일 KPI 리포트 Job 완료" if ok else "📊 일일 KPI 리포트 Job 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     scheduler.add_job(
@@ -115,6 +122,11 @@ def run_scheduler_forever() -> None:
         id="dm_campaign_runner",
     )
     scheduler.add_job(
+        _job_daily_report,
+        trigger=CronTrigger(hour=9, minute=0),
+        id="daily_report",
+    )
+    scheduler.add_job(
         _job_retry_sender,
         trigger=CronTrigger(hour=12, minute=0),
         id="retry_sender",
@@ -125,7 +137,7 @@ def run_scheduler_forever() -> None:
     jobs = list(scheduler.get_jobs())
     for j in jobs:
         logger.info("다음 예약: %s — %s", j.id, j.next_run_time)
-    print("--- 스케줄러 기동: 수집 00:00, 발송 06:00, 재발송 12:00 ---", flush=True)
+    print("--- 스케줄러 기동: 수집 00:00, 발송 06:00, KPI 리포트 09:00, 재발송 12:00 ---", flush=True)
 
     try:
         while True:

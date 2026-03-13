@@ -389,6 +389,60 @@ def get_campaign_stats() -> dict:
     }
 
 
+def get_count_added_on_date(target_date) -> int:
+    """added_at 날짜가 target_date인 행 수 (일일 리포트용). target_date: date 객체."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return 0
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM broadcast_targets WHERE (added_at AT TIME ZONE 'UTC')::date = %s",
+                (target_date,),
+            )
+            row = cur.fetchone()
+        conn.close()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        logger.warning("get_count_added_on_date failed: %s", e)
+        return 0
+
+
+def get_count_clicked_on_date(target_date) -> int:
+    """clicked_at 날짜가 target_date인 행 수 (일일 리포트용). target_date: date 객체."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return 0
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM broadcast_targets WHERE clicked_at IS NOT NULL AND (clicked_at AT TIME ZONE 'UTC')::date = %s",
+                (target_date,),
+            )
+            row = cur.fetchone()
+        conn.close()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        logger.warning("get_count_clicked_on_date failed: %s", e)
+        return 0
+
+
+def get_retry_sent_count() -> int:
+    """retry_sent = TRUE 인 행 수."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return 0
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE retry_sent = TRUE")
+            row = cur.fetchone()
+        conn.close()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        logger.warning("get_retry_sent_count failed: %s", e)
+        return 0
+
+
 def get_retry_targets(cutoff: datetime | None = None) -> list[tuple[int, str]]:
     if not (os.getenv("DATABASE_URL") or "").strip():
         return []
