@@ -24,6 +24,14 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# DATABASE_URL을 bot/.env 또는 루트 .env에서 로드
+try:
+    from dotenv import load_dotenv
+    load_dotenv(REPO_ROOT / "bot" / ".env")
+    load_dotenv(REPO_ROOT / ".env")
+except ImportError:
+    pass
 POSTS_DB = REPO_ROOT / "automation" / "data" / "posts.db"
 USERS_DB  = REPO_ROOT / "bot" / "data" / "users.db"
 

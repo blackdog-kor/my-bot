@@ -7,13 +7,10 @@ Optional: USER_DELAY_MIN/MAX, LONG_BREAK_*, VIP_URL, AFFILIATE_URL, TRACKING_SER
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import os
 import random
 from typing import Awaitable, Callable
-
-import httpx
 
 logger = logging.getLogger("userbot_sender")
 
@@ -25,24 +22,6 @@ LONG_BREAK_MAX   = float(os.getenv("LONG_BREAK_MAX",   "600"))
 VIP_URL = os.getenv("VIP_URL", "https://1wwtgq.com/?p=mskf")
 AFFILIATE_URL = (os.getenv("AFFILIATE_URL") or "").strip()
 TRACKING_SERVER_URL = (os.getenv("TRACKING_SERVER_URL") or "").rstrip("/")
-
-
-async def _download_via_bot_api(bot_token: str, file_id: str) -> tuple[bytes, str]:
-    async with httpx.AsyncClient(timeout=120) as hc:
-        r = await hc.get(
-            f"https://api.telegram.org/bot{bot_token}/getFile",
-            params={"file_id": file_id},
-        )
-        r.raise_for_status()
-        data = r.json()
-        if not data.get("ok"):
-            raise RuntimeError(f"getFile failed: {data}")
-        remote_path: str = data["result"]["file_path"]
-        dl = await hc.get(
-            f"https://api.telegram.org/file/bot{bot_token}/{remote_path}",
-        )
-        dl.raise_for_status()
-        return dl.content, remote_path
 
 
 async def broadcast_via_userbot(
@@ -64,6 +43,8 @@ async def broadcast_via_userbot(
             PeerIdInvalid,
             UsernameNotOccupied,
             UsernameInvalid,
+            UserPrivacyRestricted,
+            UserNotParticipant,
             RPCError,
         )
     except ImportError:
@@ -113,12 +94,7 @@ async def broadcast_via_userbot(
             await notify_callback(msg)
         return {"total": 0, "sent": 0, "failed": 0, "skipped": 0}
 
-    if notify_callback:
-        await notify_callback("⬇️ 파일 다운로드 중 (Bot API)...")
-    file_bytes, remote_path = await _download_via_bot_api(bot_token, file_id)
-    logger.info("다운로드 완료 (%d bytes)", len(file_bytes))
-
-    # 계정별 Client + Saved Messages 메시지 준비
+    # 계정별 Client 준비
     accounts = []
     for label, session in sessions:
         client = Client(
@@ -128,26 +104,11 @@ async def broadcast_via_userbot(
             session_string=session,
         )
         await client.start()
-        if notify_callback:
-            await notify_callback(f"📤 [{label}] Saved Messages에 미디어 업로드 중...")
-
-        bio = io.BytesIO(file_bytes)
-        if file_type == "photo":
-            bio.name = "photo.jpg"
-            saved_msg = await client.send_photo("me", bio, caption=caption)
-        elif file_type == "video":
-            bio.name = "video.mp4"
-            saved_msg = await client.send_video("me", bio, caption=caption)
-        else:
-            ext = remote_path.rsplit(".", 1)[-1] if "." in remote_path else "bin"
-            bio.name = f"file.{ext}"
-            saved_msg = await client.send_document("me", bio, caption=caption)
 
         accounts.append(
             {
                 "label": label,
                 "client": client,
-                "saved_msg_id": saved_msg.id,
                 "cooldown_until": 0.0,
             }
         )
@@ -221,49 +182,70 @@ async def broadcast_via_userbot(
                         continue
 
                     client = acc["client"]
-                    saved_msg_id = acc["saved_msg_id"]
 
-                    # 1) username을 peer로 먼저 resolve 해서 PEER_ID_INVALID 방지
+                    # 1) username을 실제 User 객체로 resolve (get_users) → 캐시 등록 + id 확보
                     try:
-                        peer = await client.resolve_peer(username_clean)
+                        user = await client.get_users(target)
                     except FloodWait as e:
                         wait = e.value + 5
                         acc["cooldown_until"] = now + wait
                         warn = (
-                            f"⚠️ [{acc['label']}] FloodWait {wait}초 (resolve_peer) — 계정 쿨다운 후 "
+                            f"⚠️ [{acc['label']}] FloodWait {wait}초 (get_users) — 계정 쿨다운 후 "
                             f"다음 계정으로 로테이션."
                         )
                         logger.warning(warn)
                         if notify_callback:
                             await notify_callback(warn)
                         continue
-                    except (PeerIdInvalid, UsernameNotOccupied, UsernameInvalid) as e:
-                        # username 기반으로도 peer를 찾지 못하는 유저 → 발송 불가, 재시도 대상에서 제외
-                        logger.warning("Skipping %s: %s", target, e)
+                    except (
+                        UserIsBlocked,
+                        InputUserDeactivated,
+                        PeerIdInvalid,
+                        UsernameNotOccupied,
+                        UsernameInvalid,
+                        UserPrivacyRestricted,
+                        UserNotParticipant,
+                    ) as e:
+                        # 발송이 구조적으로 불가능한 유저 → 스킵 및 재시도 방지
+                        logger.warning("Skipping %s (get_users): %s", target, e)
                         skipped += 1
                         delivered = True
                         batch_done.append(uid)
                         break
                     except RPCError as e:
                         failed += 1
-                        logger.error("RPCError (resolve_peer) for %s: %s", target, e)
+                        logger.error("RPCError (get_users) for %s: %s", target, e)
                         delivered = True
                         break
                     except Exception as e:
                         failed += 1
-                        logger.error("Unexpected error (resolve_peer) for %s: %s", target, e)
+                        logger.error("Unexpected error (get_users) for %s: %s", target, e)
                         delivered = True
                         break
 
-                    # 2) resolve된 peer로 메시지 복사
+                    # 2) loaded_message 의 file_id 를 직접 사용해서 발송
                     try:
-                        await client.copy_message(
-                            chat_id=peer,
-                            from_chat_id="me",
-                            message_id=saved_msg_id,
-                            caption=user_caption,
-                            reply_markup=keyboard,
-                        )
+                        if file_type == "photo":
+                            await client.send_photo(
+                                chat_id=user.id,
+                                photo=file_id,
+                                caption=user_caption,
+                                reply_markup=keyboard,
+                            )
+                        elif file_type == "video":
+                            await client.send_video(
+                                chat_id=user.id,
+                                video=file_id,
+                                caption=user_caption,
+                                reply_markup=keyboard,
+                            )
+                        else:
+                            await client.send_document(
+                                chat_id=user.id,
+                                document=file_id,
+                                caption=user_caption,
+                                reply_markup=keyboard,
+                            )
                         sent += 1
                         delivered = True
                         break
@@ -279,11 +261,16 @@ async def broadcast_via_userbot(
                             await notify_callback(warn)
                         # 다른 계정으로 시도
                         continue
-                    except (UserIsBlocked, InputUserDeactivated):
-                        skipped += 1
-                        delivered = True
-                        break
-                    except (PeerIdInvalid, UsernameNotOccupied, UsernameInvalid):
+                    except (
+                        UserIsBlocked,
+                        InputUserDeactivated,
+                        PeerIdInvalid,
+                        UsernameNotOccupied,
+                        UsernameInvalid,
+                        UserPrivacyRestricted,
+                        UserNotParticipant,
+                    ) as e:
+                        logger.warning("Skipping %s (send): %s", target, e)
                         skipped += 1
                         delivered = True
                         break
@@ -320,14 +307,9 @@ async def broadcast_via_userbot(
             batch_done = []
 
     finally:
-        # Saved Messages 정리 및 클라이언트 종료
+        # 클라이언트 종료
         for acc in accounts:
             client = acc["client"]
-            saved_msg_id = acc["saved_msg_id"]
-            try:
-                await client.delete_messages("me", saved_msg_id)
-            except Exception:
-                pass
             try:
                 await client.stop()
             except Exception:
