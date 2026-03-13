@@ -99,6 +99,41 @@ async def _notify(text: str) -> None:
         pass
 
 
+async def _send_preview(file_id: str, file_type: str, caption: str) -> None:
+    """
+    이번 캠페인에서 실제로 발송될 게시물을 관리자에게 그대로 보여주는 미리보기.
+
+    - Bot API의 sendPhoto/sendVideo/sendDocument 에 file_id를 그대로 사용
+    - caption은 그대로 사용 (UserBot 발송 시와 동일)
+    """
+    if not BOT_TOKEN or not ADMIN_ID or not file_id:
+        return
+
+    endpoint: str
+    payload: dict
+
+    if file_type == "video":
+        endpoint = "sendVideo"
+        payload = {"chat_id": ADMIN_ID, "video": file_id, "caption": caption}
+    elif file_type == "document":
+        endpoint = "sendDocument"
+        payload = {"chat_id": ADMIN_ID, "document": file_id, "caption": caption}
+    else:
+        # 기본값: 사진
+        endpoint = "sendPhoto"
+        payload = {"chat_id": ADMIN_ID, "photo": file_id, "caption": caption}
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as hc:
+            await hc.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/{endpoint}",
+                json=payload,
+            )
+    except Exception:
+        # 미리보기 실패는 치명적이지 않으므로 조용히 무시
+        pass
+
+
 async def main() -> None:
     # 장전된 메시지 확인
     loaded = _get_loaded_message_full()
@@ -120,7 +155,12 @@ async def main() -> None:
         print("❌ BOT_TOKEN이 설정되지 않았습니다.")
         return
 
-    await _notify("🚀 DM 캠페인 자동 실행 시작\n장전된 메시지를 기준으로 발송을 시작합니다.")
+    # 1) 이번 캠페인에서 발송될 게시물 미리보기 전송
+    await _notify(
+        "🚀 DM 캠페인 자동 실행 시작\n"
+        "아래 미리보기 메시지가 이번 캠페인에서 발송될 실제 게시물입니다."
+    )
+    await _send_preview(file_id=file_id, file_type=file_type, caption=caption)
 
     try:
         result = await broadcast_via_userbot(
