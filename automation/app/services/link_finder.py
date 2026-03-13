@@ -10,12 +10,35 @@ GOOGLE_SEARCH_URL = "https://www.google.com/search"
 
 
 TARGET_BRANDS = [
+    # ── 국제 메이저 브랜드 ──────────────────────────────────────────────────────
     "1win telegram group",
     "1win official telegram",
+    "1win korea telegram",
     "Stake telegram group",
     "Stake official telegram",
     "BC.Game telegram group",
     "BC.Game official telegram",
+    "Rollbit telegram group",
+    "Roobet telegram group",
+    "Bets.io telegram group",
+
+    # ── 한국어 카지노 / 베팅 커뮤니티 ────────────────────────────────────────────
+    "카지노 텔레그램 그룹",
+    "온라인카지노 텔레그램",
+    "바카라 텔레그램 커뮤니티",
+    "슬롯 텔레그램 그룹",
+    "스포츠토토 텔레그램",
+    "해외배팅 텔레그램",
+    "먹튀없는 카지노 텔레그램",
+    "원윈 텔레그램 그룹",
+    "원윈 공식 텔레그램",
+    "casino korea telegram 그룹",
+
+    # ── 동남아 / 글로벌 확장 ──────────────────────────────────────────────────
+    "casino telegram group members",
+    "online casino telegram community",
+    "gambling telegram group link",
+    "sports betting telegram channel",
 ]
 
 
