@@ -149,6 +149,15 @@ def set_loaded_message(
     )
     DB.commit()
 
+    # PostgreSQL에도 동일한 loaded_message 메타데이터 저장 (Railway 재배포 후에도 유지)
+    if (os.getenv("DATABASE_URL") or "").strip():
+        try:
+            from app.pg_broadcast import save_loaded_message as pg_save_loaded_message
+
+            pg_save_loaded_message(file_id=file_id, file_type=file_type, caption=caption)
+        except Exception as e:
+            logger.warning("pg save_loaded_message failed: %s", e)
+
 
 def get_all_user_ids() -> list[int]:
     db_url = (os.getenv("DATABASE_URL") or "").strip()
@@ -547,16 +556,17 @@ def _home_keyboard() -> InlineKeyboardMarkup:
 
 async def _run_script_background(script_name: str) -> None:
     """scripts/{script_name} 를 백그라운드에서 실행."""
-    script_path = ROOT_DIR / "scripts" / script_name
-    if not script_path.is_file():
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    script_path = os.path.join(root_dir, "scripts", script_name)
+    if not os.path.isfile(script_path):
         logger.warning("Script not found: %s", script_path)
         return
     try:
         await asyncio.create_subprocess_exec(
             sys.executable,
-            str(script_path),
-            cwd=str(ROOT_DIR),
-            env=os.environ.copy(),
+            script_path,
+            cwd=root_dir,
+            env={**os.environ},
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

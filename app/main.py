@@ -33,11 +33,12 @@ async def lifespan(app: FastAPI):
     # 3. 앱 시작 시 ensure_pg_table() (실패 시 로그만)
     if (os.getenv("DATABASE_URL") or "").strip():
         try:
-            from app.pg_broadcast import ensure_pg_table
+            from app.pg_broadcast import ensure_pg_table, ensure_loaded_message_table
             ensure_pg_table()
-            logger.info("ensure_pg_table OK")
+            ensure_loaded_message_table()
+            logger.info("ensure_pg_table / ensure_loaded_message_table OK")
         except Exception as e:
-            logger.warning("ensure_pg_table: %s", e)
+            logger.warning("ensure_pg_table / ensure_loaded_message_table: %s", e)
 
     # 4. bot.main / app.scheduler 스레드 (별도 이벤트 루프에서 bot 실행)
     def _run_bot() -> None:

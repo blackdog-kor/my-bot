@@ -90,6 +90,30 @@ def ensure_pg_table() -> None:
         logger.warning("ensure_pg_table failed: %s", e)
 
 
+def ensure_loaded_message_table() -> None:
+    """Create loaded_message table (for media metadata) if it doesn't exist."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        logger.warning("DATABASE_URL not set — skipping loaded_message table setup")
+        return
+    try:
+        conn = _get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS loaded_message (
+                        id         INTEGER PRIMARY KEY DEFAULT 1,
+                        file_id    TEXT,
+                        file_type  TEXT,
+                        caption    TEXT,
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+        conn.close()
+        logger.info("loaded_message table ready")
+    except Exception as e:
+        logger.warning("ensure_loaded_message_table failed: %s", e)
+
+
 def upsert_user(telegram_user_id: int, username: str = "", source: str = "bot") -> None:
     if not (os.getenv("DATABASE_URL") or "").strip():
         return
@@ -441,6 +465,56 @@ def get_retry_sent_count() -> int:
     except Exception as e:
         logger.warning("get_retry_sent_count failed: %s", e)
         return 0
+
+
+def save_loaded_message(file_id: str, file_type: str, caption: str) -> None:
+    """Upsert loaded_message row (always id=1)."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return
+    try:
+        conn = _get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO loaded_message (id, file_id, file_type, caption, updated_at)
+                    VALUES (1, %s, %s, %s, NOW())
+                    ON CONFLICT (id) DO UPDATE
+                    SET file_id = EXCLUDED.file_id,
+                        file_type = EXCLUDED.file_type,
+                        caption = EXCLUDED.caption,
+                        updated_at = NOW()
+                    """,
+                    (file_id or "", file_type or "photo", caption or ""),
+                )
+        conn.close()
+    except Exception as e:
+        logger.warning("save_loaded_message failed: %s", e)
+
+
+def get_loaded_message() -> tuple[str, str, str] | None:
+    """Return (file_id, file_type, caption) from PostgreSQL loaded_message, or None."""
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return None
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT file_id, file_type, caption FROM loaded_message WHERE id = 1"
+            )
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        file_id = row[0] or ""
+        file_type = row[1] or "photo"
+        caption = row[2] or ""
+        if not file_id:
+            return None
+        return file_id, file_type, caption
+    except Exception as e:
+        logger.warning("get_loaded_message failed: %s", e)
+        return None
 
 
 def get_retry_targets(cutoff: datetime | None = None) -> list[tuple[int, str]]:
