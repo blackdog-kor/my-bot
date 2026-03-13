@@ -109,6 +109,14 @@ def _job_daily_report() -> None:
         _notify("📊 일일 KPI 리포트 Job 완료" if ok else "📊 일일 KPI 리포트 Job 실패")
 
 
+def _job_channel_post() -> None:
+    """CHANNEL_ID 채널에 프리미엄 게시물 1건 발송 (1시간 간격)."""
+    with _job_lock:
+        ok = _run_script("channel_post.py", "채널 발송(channel_post)")
+        if not ok:
+            logger.warning("channel_post 실패 (CHANNEL_ID 미설정이면 정상)")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     scheduler.add_job(
@@ -131,13 +139,19 @@ def run_scheduler_forever() -> None:
         trigger=CronTrigger(hour=12, minute=0),
         id="retry_sender",
     )
+    # 채널 발송: 매시 0분 (CHANNEL_ID 설정 시에만 유효)
+    scheduler.add_job(
+        _job_channel_post,
+        trigger=CronTrigger(minute=0),
+        id="channel_hourly",
+    )
     scheduler.start()
 
     # 다음 예약 Job 목록 로그
     jobs = list(scheduler.get_jobs())
     for j in jobs:
         logger.info("다음 예약: %s — %s", j.id, j.next_run_time)
-    print("--- 스케줄러 기동: 수집 00:00, 발송 06:00, KPI 리포트 09:00, 재발송 12:00 ---", flush=True)
+    print("--- 스케줄러 기동: 수집 00:00, 발송 06:00, KPI 09:00, 재발송 12:00, 채널 매시정각 ---", flush=True)
 
     try:
         while True:

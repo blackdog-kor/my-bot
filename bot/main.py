@@ -1,7 +1,7 @@
 """
 Admin Bot 진입점 (통합 구조).
-repo root를 sys.path에 넣고 bot.handlers.callbacks에서 핸들러 등록.
-CHANNEL_ID 설정 시 기동 시 + 1시간 간격 채널 발송.
+Application 인스턴스는 프로세스당 1개만 생성하고 main()/run_bot() 이 공유.
+채널 발송(1시간 간격)은 app/scheduler.py 로 이전.
 """
 from __future__ import annotations
 
@@ -11,9 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from telegram import Bot
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 # Railway 배포 환경 모듈 경로 (bot.src 등)
@@ -51,81 +49,51 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-def _run_channel_post_once() -> None:
-    if not BOT_TOKEN or not CHANNEL_ID:
-        return
-    try:
-        from app.services.premium_formatter import post_premium_to_channel
-        bot = Bot(token=BOT_TOKEN)
-        asyncio.run(post_premium_to_channel(bot))
-    except Exception as e:
-        logger.exception("채널 전송 실패: %s", e)
+# ---------------------------------------------------------------------------
+# Application 단일 인스턴스 (프로세스당 1개)
+# ---------------------------------------------------------------------------
+_application: Application | None = None
 
 
-def main() -> None:
+def build_application() -> Application:
+    """Application 인스턴스를 1회만 생성하고 반환. main()과 run_bot()이 공유."""
+    global _application
+    if _application is not None:
+        return _application
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN이 설정되지 않았습니다.")
-        return
-
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler("test_post", test_post_command))
-    application.add_handler(CallbackQueryHandler(callback))
-    application.add_handler(
+        raise RuntimeError("BOT_TOKEN이 설정되지 않았습니다.")
+    _application = Application.builder().token(BOT_TOKEN).build()
+    _application.add_handler(CommandHandler("start", start))
+    _application.add_handler(CommandHandler("admin", admin_command))
+    _application.add_handler(CommandHandler("test_post", test_post_command))
+    _application.add_handler(CallbackQueryHandler(callback))
+    _application.add_handler(
         MessageHandler(
             filters.PHOTO | filters.VIDEO | filters.Document.ALL,
             admin_load_message_handler,
         )
     )
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
-    if CHANNEL_ID:
-        _run_channel_post_once()
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(_run_channel_post_once, "interval", hours=1, id="channel_hourly")
-        scheduler.start()
-
-    print("--- Admin Bot Polling 시작 ---", flush=True)
-
-    async def run():
-        async with application:
-            await application.initialize()
-            await application.start()
-            await application.updater.start_polling(drop_pending_updates=True)
-            await asyncio.Event().wait()
-
-    asyncio.run(run())
+    _application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    return _application
 
 
 async def run_bot() -> None:
-    """Async entry point for app/main.py thread (별도 이벤트 루프에서 실행)."""
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN이 설정되지 않았습니다.")
-        return
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler("test_post", test_post_command))
-    application.add_handler(CallbackQueryHandler(callback))
-    application.add_handler(
-        MessageHandler(
-            filters.PHOTO | filters.VIDEO | filters.Document.ALL,
-            admin_load_message_handler,
-        )
-    )
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    if CHANNEL_ID:
-        _run_channel_post_once()
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(_run_channel_post_once, "interval", hours=1, id="channel_hourly")
-        scheduler.start()
+    """폴링 실행 (main() 또는 app/main.py 스레드에서 호출). 단일 Application 사용."""
+    application = build_application()
+    print("--- Admin Bot Polling 시작 ---", flush=True)
     async with application:
         await application.initialize()
         await application.start()
         await application.updater.start_polling(drop_pending_updates=True)
         await asyncio.Event().wait()
+
+
+def main() -> None:
+    """직접 실행 시 (python -m bot.main): asyncio.run(run_bot()) 1곳만 호출."""
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN이 설정되지 않았습니다.")
+        return
+    asyncio.run(run_bot())
 
 
 if __name__ == "__main__":
