@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-수동 SESSION_STRING 생성기 (스크립트).
+수동 SESSION_STRING 생성기 (스크립트, Railway 환경변수 기반).
 
 기능:
-  1) 실행 시 전화번호 입력 (예: +77012345678)
-  2) Pyrogram 으로 해당 번호에 인증코드 발송
-  3) 터미널에서 인증코드 입력
+  1) PHONE_NUMBER 환경변수로 인증코드 발송
+  2) 로그에 \"인증코드를 PHONE_CODE 환경변수에 입력 후 재배포\" 안내
+  3) PHONE_CODE 환경변수가 설정되어 있으면 로그인 진행
   4) 로그인 완료 후 SESSION_STRING 콘솔 출력
   5) data/sessions.txt 에 SESSION_STRING_N=값 형식으로 자동 저장
 
@@ -88,19 +88,23 @@ async def main() -> None:
 
     print()
     print("=" * 66)
-    print("   Pyrogram SESSION_STRING 생성기 (수동)")
+    print("   Pyrogram SESSION_STRING 생성기 (환경변수 기반)")
     print("=" * 66)
     print()
     print(f"  ✅ API_ID  : {api_id}")
     print(f"  ✅ API_HASH: {api_hash[:8]}{'*' * max(0, len(api_hash) - 8)}")
     print()
 
-    phone_number = input("  전화번호를 입력하세요 (예: +77012345678): ").strip()
-    if not phone_number.startswith("+"):
-        print("❌ 국제 형식(+국가코드)이 아닙니다.")
-        sys.exit(1)
+    phone_number = (os.getenv("PHONE_NUMBER") or "").strip()
+    phone_code = (os.getenv("PHONE_CODE") or "").strip()
 
-    session_string = ""
+    if not phone_number:
+        print("❌ PHONE_NUMBER 환경변수가 설정되지 않았습니다.")
+        print("   예) PHONE_NUMBER=\"+77012345678\"")
+        sys.exit(1)
+    if not phone_number.startswith("+"):
+        print("❌ PHONE_NUMBER 가 국제 형식(+국가코드)이 아닙니다.")
+        sys.exit(1)
 
     # in_memory=True → .session 파일을 디스크에 생성하지 않음
     async with Client(
@@ -116,15 +120,16 @@ async def main() -> None:
             print("❌ phone_code_hash 를 얻지 못했습니다.")
             sys.exit(1)
 
-        print()
-        print("  텔레그램 앱으로 전송된 인증코드를 입력하세요.")
-        code = input("  인증코드: ").strip()
-        if not code:
-            print("❌ 인증코드가 비어 있습니다.")
-            sys.exit(1)
+        if not phone_code:
+            # 첫 실행: 코드만 발송하고 종료, PHONE_CODE 설정을 안내
+            print()
+            print("✅ 인증코드를 전송했습니다.")
+            print("👉 받은 인증코드를 PHONE_CODE 환경변수에 입력한 뒤 다시 배포/실행하세요.")
+            print("   예) PHONE_CODE=\"12345\"")
+            return
 
         # 2) 코드로 로그인
-        await app.sign_in(phone_number, phone_code_hash, code)
+        await app.sign_in(phone_number, phone_code_hash, phone_code.strip())
 
         # 3) SESSION_STRING 추출
         session_string = await app.export_session_string()
