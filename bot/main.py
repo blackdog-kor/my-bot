@@ -88,7 +88,44 @@ def main() -> None:
         scheduler.start()
 
     print("--- Admin Bot Polling 시작 ---", flush=True)
-    application.run_polling(drop_pending_updates=True)
+
+    async def run():
+        async with application:
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling(drop_pending_updates=True)
+            await asyncio.Event().wait()
+
+    asyncio.run(run())
+
+
+async def run_bot() -> None:
+    """Async entry point for app/main.py thread (별도 이벤트 루프에서 실행)."""
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN이 설정되지 않았습니다.")
+        return
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("test_post", test_post_command))
+    application.add_handler(CallbackQueryHandler(callback))
+    application.add_handler(
+        MessageHandler(
+            filters.PHOTO | filters.VIDEO | filters.Document.ALL,
+            admin_load_message_handler,
+        )
+    )
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    if CHANNEL_ID:
+        _run_channel_post_once()
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(_run_channel_post_once, "interval", hours=1, id="channel_hourly")
+        scheduler.start()
+    async with application:
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(drop_pending_updates=True)
+        await asyncio.Event().wait()
 
 
 if __name__ == "__main__":

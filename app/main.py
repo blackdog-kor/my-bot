@@ -39,11 +39,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("ensure_pg_table: %s", e)
 
-    # 4. bot.main / app.scheduler 스레드 (임포트·시작 실패 시 로그만)
+    # 4. bot.main / app.scheduler 스레드 (별도 이벤트 루프에서 bot 실행)
     def _run_bot() -> None:
         try:
-            from bot.main import main as bot_main
-            bot_main()
+            import asyncio
+            from bot.main import run_bot as bot_main
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(bot_main())
         except Exception as e:
             logger.exception("Bot thread exited: %s", e)
 
