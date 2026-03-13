@@ -210,76 +210,89 @@ def main() -> None:
         full_phone = f"+{raw_phone.lstrip('+')}"
         print(f"[계정 {idx}] 번호 확보: id={req_id}, phone={full_phone}")
 
+        # Pyrogram Client: connect() → send_code() → sign_in() → export() → disconnect()
+        app = Client(
+            name=f"session_{raw_phone}",
+            api_id=api_id,
+            api_hash=api_hash,
+            in_memory=True,
+        )
         try:
-            with Client(
-                name=f"auto_session_{idx}",
-                api_id=api_id,
-                api_hash=api_hash,
-                in_memory=True,
-            ) as app:
-                # 2) 인증 코드 발송
-                sent = app.send_code(full_phone)
-                phone_code_hash = getattr(sent, "phone_code_hash", None)
-                if not phone_code_hash:
-                    print("❌ phone_code_hash 를 얻지 못했습니다. 번호 취소 후 다음 계정으로.")
-                    hero_set_status(scraper, hero_key, req_id, status=8)
-                    fail += 1
-                    continue
-                print(f"[계정 {idx}] 코드 발송 완료, hash={phone_code_hash}")
+            app.connect()
 
-                # 3) 코드 수신 (최대 2분, 10초 간격)
-                code = None
-                deadline = time.time() + 120
-                while time.time() < deadline:
-                    status_text = hero_get_status(scraper, hero_key, req_id)
-                    print(f"[계정 {idx}] getStatus 응답: {status_text}")
-                    if status_text.startswith("STATUS_OK:"):
-                        try:
-                            _, code_part = status_text.split(":", 1)
-                            code = code_part.strip()
-                            break
-                        except ValueError:
-                            pass
-                    elif status_text.startswith("STATUS_CANCEL"):
-                        print(f"[계정 {idx}] 번호가 취소됨. 다음 계정으로.")
+            # 2) 인증 코드 발송
+            sent = app.send_code(full_phone)
+            phone_code_hash = getattr(sent, "phone_code_hash", None)
+            if not phone_code_hash:
+                print("❌ phone_code_hash 를 얻지 못했습니다. 번호 취소 후 다음 계정으로.")
+                hero_set_status(scraper, hero_key, req_id, status=8)
+                fail += 1
+                app.disconnect()
+                continue
+            print(f"[계정 {idx}] 코드 발송 완료, hash={phone_code_hash}")
+
+            # 3) 코드 수신 (최대 2분, 10초 간격)
+            code = None
+            deadline = time.time() + 120
+            while time.time() < deadline:
+                status_text = hero_get_status(scraper, hero_key, req_id)
+                print(f"[계정 {idx}] getStatus 응답: {status_text}")
+                if status_text.startswith("STATUS_OK:"):
+                    try:
+                        _, code_part = status_text.split(":", 1)
+                        code = code_part.strip()
                         break
-                    # STATUS_WAIT_CODE 또는 기타: 잠시 대기 후 재시도
-                    time.sleep(10)
+                    except ValueError:
+                        pass
+                elif status_text.startswith("STATUS_CANCEL"):
+                    print(f"[계정 {idx}] 번호가 취소됨. 다음 계정으로.")
+                    break
+                # STATUS_WAIT_CODE 또는 기타: 잠시 대기 후 재시도
+                time.sleep(10)
 
-                if not code:
-                    print(f"[계정 {idx}] 2분 내 코드 미수신. 번호 취소 후 다음 계정으로.")
-                    hero_set_status(scraper, hero_key, req_id, status=8)
-                    fail += 1
-                    continue
+            if not code:
+                print(f"[계정 {idx}] 2분 내 코드 미수신. 번호 취소 후 다음 계정으로.")
+                hero_set_status(scraper, hero_key, req_id, status=8)
+                fail += 1
+                app.disconnect()
+                continue
 
-                # 4) 자동 로그인
-                try:
-                    app.sign_in(full_phone, phone_code_hash, code)
-                except PhoneCodeExpired:
-                    print(f"[계정 {idx}] PhoneCodeExpired: 번호 취소 후 다음 계정으로.")
-                    hero_set_status(scraper, hero_key, req_id, status=8)
-                    fail += 1
-                    continue
-                except Exception as e:
-                    print(f"[계정 {idx}] 로그인 오류: {e}")
-                    hero_set_status(scraper, hero_key, req_id, status=8)
-                    fail += 1
-                    continue
+            # 4) 자동 로그인
+            try:
+                app.sign_in(full_phone, phone_code_hash, code)
+            except PhoneCodeExpired:
+                print(f"[계정 {idx}] PhoneCodeExpired: 번호 취소 후 다음 계정으로.")
+                hero_set_status(scraper, hero_key, req_id, status=8)
+                fail += 1
+                app.disconnect()
+                continue
+            except Exception as e:
+                print(f"[계정 {idx}] 로그인 오류: {e}")
+                hero_set_status(scraper, hero_key, req_id, status=8)
+                fail += 1
+                app.disconnect()
+                continue
 
-                # 5) SESSION_STRING 생성 및 저장
-                session_string = app.export_session_string()
-                session_idx = _append_session(session_string)
-                print(f"[계정 {idx}] SESSION_STRING_{session_idx} 저장 완료")
+            # 5) SESSION_STRING 생성 및 저장
+            session_string = app.export_session_string()
+            session_idx = _append_session(session_string)
+            print(f"[계정 {idx}] SESSION_STRING_{session_idx} 저장 완료")
 
-                # 6) 번호 사용 완료 처리 (status=6)
-                hero_set_status(scraper, hero_key, req_id, status=6)
-                success += 1
+            # 6) 번호 사용 완료 처리 (status=6)
+            hero_set_status(scraper, hero_key, req_id, status=6)
+            success += 1
+
+            app.disconnect()
 
         except Exception as e:
             print(f"[계정 {idx}] 예외 발생: {e}")
             # 안전하게 번호 취소 시도
             try:
                 hero_set_status(scraper, hero_key, req_id, status=8)
+            except Exception:
+                pass
+            try:
+                app.disconnect()
             except Exception:
                 pass
             fail += 1
