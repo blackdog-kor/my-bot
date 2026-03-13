@@ -91,7 +91,14 @@ def ensure_pg_table() -> None:
 
 
 def ensure_loaded_message_table() -> None:
-    """Create loaded_message table (for media metadata) if it doesn't exist."""
+    """Create loaded_message table (for media metadata) if it doesn't exist.
+
+    Schema (PostgreSQL, app-level):
+      - id: always 1
+      - userbot_message_id: INTEGER (Pyrogram UserBot Saved Messages message_id)
+      - file_type: 'photo' | 'video' | 'document'
+      - caption: TEXT
+    """
     if not (os.getenv("DATABASE_URL") or "").strip():
         logger.warning("DATABASE_URL not set — skipping loaded_message table setup")
         return
@@ -99,15 +106,29 @@ def ensure_loaded_message_table() -> None:
         conn = _get_conn()
         with conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                # 기본 테이블 생성
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS loaded_message (
-                        id         INTEGER PRIMARY KEY DEFAULT 1,
-                        file_id    TEXT,
-                        file_type  TEXT,
-                        caption    TEXT,
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                        id                 INTEGER PRIMARY KEY DEFAULT 1,
+                        userbot_message_id INTEGER,
+                        file_type          TEXT,
+                        caption            TEXT,
+                        updated_at         TIMESTAMPTZ DEFAULT NOW()
                     )
-                """)
+                    """
+                )
+                # 기존 인스턴스에서 컬럼이 없을 수 있으므로 안전하게 ADD COLUMN 시도
+                for alter_sql in (
+                    "ALTER TABLE loaded_message ADD COLUMN userbot_message_id INTEGER",
+                    "ALTER TABLE loaded_message ADD COLUMN file_type TEXT",
+                    "ALTER TABLE loaded_message ADD COLUMN caption TEXT",
+                    "ALTER TABLE loaded_message ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW()",
+                ):
+                    try:
+                        cur.execute(alter_sql)
+                    except Exception:
+                        pass
         conn.close()
         logger.info("loaded_message table ready")
     except Exception as e:
@@ -467,8 +488,8 @@ def get_retry_sent_count() -> int:
         return 0
 
 
-def save_loaded_message(file_id: str, file_type: str, caption: str) -> None:
-    """Upsert loaded_message row (always id=1)."""
+def save_loaded_message(userbot_message_id: int, file_type: str, caption: str) -> None:
+    """Upsert loaded_message row (always id=1) with UserBot Saved Messages message_id."""
     if not (os.getenv("DATABASE_URL") or "").strip():
         return
     try:
@@ -477,41 +498,41 @@ def save_loaded_message(file_id: str, file_type: str, caption: str) -> None:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO loaded_message (id, file_id, file_type, caption, updated_at)
+                    INSERT INTO loaded_message (id, userbot_message_id, file_type, caption, updated_at)
                     VALUES (1, %s, %s, %s, NOW())
                     ON CONFLICT (id) DO UPDATE
-                    SET file_id = EXCLUDED.file_id,
-                        file_type = EXCLUDED.file_type,
-                        caption = EXCLUDED.caption,
-                        updated_at = NOW()
+                    SET userbot_message_id = EXCLUDED.userbot_message_id,
+                        file_type          = EXCLUDED.file_type,
+                        caption            = EXCLUDED.caption,
+                        updated_at         = NOW()
                     """,
-                    (file_id or "", file_type or "photo", caption or ""),
+                    (int(userbot_message_id), file_type or "photo", caption or ""),
                 )
         conn.close()
     except Exception as e:
         logger.warning("save_loaded_message failed: %s", e)
 
 
-def get_loaded_message() -> tuple[str, str, str] | None:
-    """Return (file_id, file_type, caption) from PostgreSQL loaded_message, or None."""
+def get_loaded_message() -> tuple[int, str, str] | None:
+    """Return (userbot_message_id, file_type, caption) from PostgreSQL loaded_message, or None."""
     if not (os.getenv("DATABASE_URL") or "").strip():
         return None
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT file_id, file_type, caption FROM loaded_message WHERE id = 1"
+                "SELECT userbot_message_id, file_type, caption FROM loaded_message WHERE id = 1"
             )
             row = cur.fetchone()
         conn.close()
         if not row:
             return None
-        file_id = row[0] or ""
+        msg_id = row[0]
         file_type = row[1] or "photo"
         caption = row[2] or ""
-        if not file_id:
+        if msg_id is None:
             return None
-        return file_id, file_type, caption
+        return int(msg_id), file_type, caption
     except Exception as e:
         logger.warning("get_loaded_message failed: %s", e)
         return None

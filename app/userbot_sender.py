@@ -27,9 +27,6 @@ TRACKING_SERVER_URL = (os.getenv("TRACKING_SERVER_URL") or "").rstrip("/")
 async def broadcast_via_userbot(
     *,
     bot_token: str,
-    file_id: str,
-    file_type: str,
-    caption: str,
     notify_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict:
     """UserBot으로 is_sent=FALSE 유저에게 발송. 반환: {total, sent, failed, skipped}."""
@@ -56,24 +53,17 @@ async def broadcast_via_userbot(
         mark_sent,
         purge_no_username,
         generate_unique_ref,
+        get_loaded_message,
     )
 
     api_id = int(os.getenv("API_ID", "0") or "0")
     api_hash = (os.getenv("API_HASH") or "").strip()
 
-    # SESSION_STRING_1 ~ SESSION_STRING_N 자동 감지, 없으면 SESSION_STRING 사용
+    # SESSION_STRING_1 만 사용 (UserBot Saved Messages 에 업로드된 message_id 기준으로 발송)
     sessions: list[tuple[str, str]] = []
-    i = 1
-    while True:
-        val = (os.getenv(f"SESSION_STRING_{i}") or "").strip()
-        if not val:
-            break
-        sessions.append((f"SESSION_STRING_{i}", val))
-        i += 1
-    if not sessions:
-        legacy = (os.getenv("SESSION_STRING") or os.getenv("SESSION_STRING_1") or "").strip()
-        if legacy:
-            sessions.append(("SESSION_STRING_1", legacy))
+    primary_session = (os.getenv("SESSION_STRING_1") or os.getenv("SESSION_STRING") or "").strip()
+    if primary_session:
+        sessions.append(("SESSION_STRING_1", primary_session))
 
     if not api_id or not api_hash or not sessions:
         raise ValueError("API_ID, API_HASH, and at least one SESSION_STRING_* must be set.")
@@ -87,6 +77,16 @@ async def broadcast_via_userbot(
         if notify_callback:
             await notify_callback(msg)
 
+    # loaded_message: UserBot Saved Messages 에 업로드된 message_id, file_type, caption 조회
+    loaded = get_loaded_message()
+    if not loaded:
+        msg = "⚠️ loaded_message 레코드가 없습니다. /admin 에서 미디어를 다시 장전해 주세요."
+        logger.warning(msg)
+        if notify_callback:
+            await notify_callback(msg)
+        return {"total": 0, "sent": 0, "failed": 0, "skipped": 0}
+    saved_msg_id, file_type, caption = loaded
+
     total_sendable = count_unsent_with_username()
     if total_sendable == 0:
         msg = "⚠️ 발송 가능한 유저(username 보유)가 없습니다."
@@ -94,7 +94,7 @@ async def broadcast_via_userbot(
             await notify_callback(msg)
         return {"total": 0, "sent": 0, "failed": 0, "skipped": 0}
 
-    # 계정별 Client 준비
+    # 계정별 Client 준비 (현재는 SESSION_STRING_1 단일 계정 기반)
     accounts = []
     for label, session in sessions:
         client = Client(
@@ -223,29 +223,15 @@ async def broadcast_via_userbot(
                         delivered = True
                         break
 
-                    # 2) loaded_message 의 file_id 를 직접 사용해서 발송
+                    # 2) UserBot Saved Messages 의 message_id 를 기반으로 copy_message 발송
                     try:
-                        if file_type == "photo":
-                            await client.send_photo(
-                                chat_id=user.id,
-                                photo=file_id,
-                                caption=user_caption,
-                                reply_markup=keyboard,
-                            )
-                        elif file_type == "video":
-                            await client.send_video(
-                                chat_id=user.id,
-                                video=file_id,
-                                caption=user_caption,
-                                reply_markup=keyboard,
-                            )
-                        else:
-                            await client.send_document(
-                                chat_id=user.id,
-                                document=file_id,
-                                caption=user_caption,
-                                reply_markup=keyboard,
-                            )
+                        await client.copy_message(
+                            chat_id=user.id,
+                            from_chat_id="me",
+                            message_id=saved_msg_id,
+                            caption=user_caption,
+                            reply_markup=keyboard,
+                        )
                         sent += 1
                         delivered = True
                         break

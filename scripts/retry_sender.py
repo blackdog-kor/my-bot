@@ -38,8 +38,8 @@ from app.pg_broadcast import (
     mark_retry_sent,
     generate_unique_ref,
     get_campaign_stats,
-    get_loaded_message,
 )
+from bot.handlers.callbacks import get_loaded_message_full
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
@@ -111,11 +111,11 @@ async def run_retry_campaign() -> None:
         "조건: 3일 전 발송, 미클릭, retry_sent=FALSE"
     )
 
-    loaded = get_loaded_message()
+    loaded = get_loaded_message_full()
     if not loaded:
         await _notify("❌ 재발송 실패: loaded_message 레코드가 없습니다.")
         return
-    file_id, file_type, _caption = loaded
+    _chat_id, _message_id, file_id, file_type, _caption = loaded
     if not file_id:
         await _notify("❌ 재발송 실패: loaded_message.file_id 가 비어 있습니다.")
         return

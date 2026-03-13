@@ -149,15 +149,6 @@ def set_loaded_message(
     )
     DB.commit()
 
-    # PostgreSQL에도 동일한 loaded_message 메타데이터 저장 (Railway 재배포 후에도 유지)
-    if (os.getenv("DATABASE_URL") or "").strip():
-        try:
-            from app.pg_broadcast import save_loaded_message as pg_save_loaded_message
-
-            pg_save_loaded_message(file_id=file_id, file_type=file_type, caption=caption)
-        except Exception as e:
-            logger.warning("pg save_loaded_message failed: %s", e)
-
 
 def get_all_user_ids() -> list[int]:
     db_url = (os.getenv("DATABASE_URL") or "").strip()
@@ -597,23 +588,95 @@ async def admin_load_message_handler(update: Update, context: ContextTypes.DEFAU
     chat_id = msg.chat_id
     message_id = msg.message_id
     caption = msg.caption or ""
+
+    # 1) Telegram Bot 쪽 SQLite loaded_message 에는 기존과 동일하게 Bot API file_id 를 저장
+    file_id = ""
+    file_type = ""
     if msg.photo:
         file_id = msg.photo[-1].file_id
-        set_loaded_message(chat_id, message_id, file_id=file_id, file_type="photo", caption=caption)
+        file_type = "photo"
+        set_loaded_message(chat_id, message_id, file_id=file_id, file_type=file_type, caption=caption)
+    elif msg.video:
+        file_id = msg.video.file_id
+        file_type = "video"
+        set_loaded_message(chat_id, message_id, file_id=file_id, file_type=file_type, caption=caption)
+    elif msg.document and msg.document.mime_type and msg.document.mime_type.startswith("video/"):
+        file_id = msg.document.file_id
+        file_type = "document"
+        set_loaded_message(chat_id, message_id, file_id=file_id, file_type=file_type, caption=caption)
+    else:
+        if msg.document:
+            await update.message.reply_text("⚠️ 동영상 또는 이미지를 보내주시면 장전됩니다.")
+        return
+
+    # 2) Bot API file_id 로 원본 파일을 다운로드한 뒤, SESSION_STRING_1 UserBot 의 Saved Messages 에 업로드
+    userbot_message_id: int | None = None
+    try:
+        import io
+        import httpx
+        from pyrogram import Client
+
+        telegram_file = await context.bot.get_file(file_id)
+        async with httpx.AsyncClient(timeout=120) as http:
+            resp = await http.get(telegram_file.file_path)
+            resp.raise_for_status()
+            file_bytes = resp.content
+
+        api_id = int(os.environ.get("API_ID", "0") or "0")
+        api_hash = (os.environ.get("API_HASH") or "").strip()
+        session_string_1 = (os.environ.get("SESSION_STRING_1") or os.environ.get("SESSION_STRING") or "").strip()
+
+        if api_id and api_hash and session_string_1:
+            async with Client(
+                "loader",
+                api_id=api_id,
+                api_hash=api_hash,
+                session_string=session_string_1,
+                in_memory=True,
+            ) as ub:
+                bio = io.BytesIO(file_bytes)
+                if file_type == "photo":
+                    sent_msg = await ub.send_photo("me", bio, caption=caption)
+                elif file_type == "video":
+                    sent_msg = await ub.send_video("me", bio, caption=caption)
+                else:
+                    sent_msg = await ub.send_document("me", bio, caption=caption)
+                userbot_message_id = sent_msg.id
+
+            # 3) PostgreSQL loaded_message 테이블에는 UserBot Saved Messages 의 message_id 를 저장
+            if userbot_message_id is not None and (os.getenv("DATABASE_URL") or "").strip():
+                try:
+                    from app.pg_broadcast import save_loaded_message as pg_save_loaded_message
+
+                    pg_save_loaded_message(
+                        userbot_message_id=userbot_message_id,
+                        file_type=file_type,
+                        caption=caption,
+                    )
+                except Exception as e:
+                    logger.warning("pg save_loaded_message failed: %s", e)
+        else:
+            logger.warning(
+                "API_ID/API_HASH/SESSION_STRING_1 not fully set — skipping UserBot upload for loaded_message"
+            )
+    except Exception as e:
+        logger.warning("UserBot loader failed while loading media: %s", e)
+
+    # 사용자 피드백
+    if file_type == "photo":
         await update.message.reply_text(
-            "✅ 장전 완료 (이미지)\n" + (f"캡션: {caption[:80]}..." if len(caption) > 80 else f"캡션: {caption or '(없음)'}") + "\n\n/admin → [🚀 장전된 메시지 발사]",
+            "✅ 장전 완료 (이미지)\n"
+            + (
+                f"캡션: {caption[:80]}..."
+                if len(caption) > 80
+                else f"캡션: {caption or '(없음)'}"
+            )
+            + "\n\n/admin → [🚀 장전된 메시지 발사]",
         )
-        return
-    if msg.video:
-        set_loaded_message(chat_id, message_id, file_id=msg.video.file_id, file_type="video", caption=caption)
+    elif file_type == "video":
         await update.message.reply_text("✅ 장전 완료 (영상)\n/admin → [🚀 장전된 메시지 발사]")
-        return
-    if msg.document and msg.document.mime_type and msg.document.mime_type.startswith("video/"):
-        set_loaded_message(chat_id, message_id, file_id=msg.document.file_id, file_type="document", caption=caption)
+    else:
         await update.message.reply_text("✅ 장전 완료 (동영상 파일)\n/admin → [🚀 장전된 메시지 발사]")
-        return
-    if msg.document:
-        await update.message.reply_text("⚠️ 동영상 또는 이미지를 보내주시면 장전됩니다.")
 
 
 async def test_post_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

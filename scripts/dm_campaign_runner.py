@@ -20,7 +20,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.userbot_sender import broadcast_via_userbot
-from app.pg_broadcast import get_campaign_stats, get_loaded_message
+from app.pg_broadcast import get_campaign_stats
+from bot.handlers.callbacks import get_loaded_message_full
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
@@ -61,7 +62,7 @@ async def _send_preview(file_id: str, file_type: str, caption: str) -> None:
 
 
 async def main() -> None:
-    loaded = get_loaded_message()
+    loaded = get_loaded_message_full()
     if not loaded:
         print("❌ 장전된 메시지가 없습니다.")
         await _notify(
@@ -69,7 +70,7 @@ async def main() -> None:
             "장전된 메시지가 없습니다. 봇 채팅에서 /admin → 이미지를 다시 장전해 주세요."
         )
         return
-    file_id, file_type, caption = loaded
+    _chat_id, _message_id, file_id, file_type, caption = loaded
     if not file_id:
         print("❌ loaded_message에 file_id가 비어 있습니다.")
         await _notify("❌ DM 캠페인 실행 실패\nloaded_message에 file_id가 비어 있습니다.")
@@ -84,9 +85,6 @@ async def main() -> None:
     try:
         result = await broadcast_via_userbot(
             bot_token=BOT_TOKEN,
-            file_id=file_id,
-            file_type=file_type,
-            caption=caption,
             notify_callback=_notify,
         )
     except Exception as e:
