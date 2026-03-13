@@ -114,6 +114,8 @@ async def hero_buy_number(client: httpx.AsyncClient) -> Optional[Tuple[str, str]
             timeout=20,
         )
         data = r.json()
+        # 원시 응답을 그대로 로그로 출력 (디버깅용)
+        print(f"[HeroSMS] getNumber raw response: {data}")
     except Exception as e:
         print(f"[HeroSMS] 번호 구매 실패: {e}")
         return None
@@ -179,6 +181,29 @@ async def hero_wait_code(client: httpx.AsyncClient, req_id: str, timeout_sec: in
         await asyncio.sleep(3)
     print(f"[HeroSMS] 코드 미수신 (마지막 응답: {last_raw})")
     return None
+
+
+async def hero_list_countries() -> None:
+    """HeroSMS API에서 사용 가능한 국가 목록을 조회해 콘솔에 출력."""
+    if not HERO_API_KEY:
+        print("HERO_SMS_API_KEY 가 설정되지 않았습니다.")
+        return
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(
+                "https://hero-sms.com/api/v1/",
+                params={
+                    "api_key": HERO_API_KEY,
+                    "action": "getCountries",
+                    "service": "tg",
+                },
+            )
+            data = r.json()
+    except Exception as e:
+        print(f"[HeroSMS] getCountries 실패: {e}")
+        return
+    print("[HeroSMS] getCountries raw response:")
+    print(data)
 
 
 async def create_account(index: int, total: int, client: httpx.AsyncClient) -> bool:
@@ -271,5 +296,11 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 사용법:
+    #   python scripts/auto_account_creator.py          → 계정 생성 실행
+    #   python scripts/auto_account_creator.py countries → 사용 가능 국가 목록 조회
+    if len(sys.argv) > 1 and sys.argv[1].lower() in {"countries", "country"}:
+        asyncio.run(hero_list_countries())
+    else:
+        asyncio.run(main())
 
