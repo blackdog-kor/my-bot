@@ -59,7 +59,9 @@ def ensure_pg_table() -> None:
                         sent_at          TIMESTAMPTZ,
                         clicked_at       TIMESTAMPTZ,
                         click_count      INTEGER      NOT NULL DEFAULT 0,
-                        unique_ref       TEXT
+                        unique_ref       TEXT,
+                        retry_sent       BOOLEAN      NOT NULL DEFAULT FALSE,
+                        retry_sent_at    TIMESTAMPTZ
                     )
                 """)
                 # 기존 테이블에 컬럼이 없다면 추가 (에러는 조용히 무시)
@@ -67,6 +69,8 @@ def ensure_pg_table() -> None:
                     "ALTER TABLE broadcast_targets ADD COLUMN clicked_at TIMESTAMPTZ",
                     "ALTER TABLE broadcast_targets ADD COLUMN click_count INTEGER NOT NULL DEFAULT 0",
                     "ALTER TABLE broadcast_targets ADD COLUMN unique_ref TEXT",
+                    "ALTER TABLE broadcast_targets ADD COLUMN retry_sent BOOLEAN NOT NULL DEFAULT FALSE",
+                    "ALTER TABLE broadcast_targets ADD COLUMN retry_sent_at TIMESTAMPTZ",
                 ):
                     try:
                         cur.execute(alter_sql)
@@ -407,3 +411,68 @@ def get_campaign_stats() -> dict:
     except Exception as e:
         logger.warning("count_total failed: %s", e)
         return 0
+
+
+def get_retry_targets(cutoff: datetime | None = None) -> list[tuple[int, str]]:
+    """
+    Return (telegram_user_id, username) for retry DM:
+      - is_sent = TRUE
+      - click_count = 0 or NULL
+      - retry_sent = FALSE
+      - sent_at <= cutoff (default: now - 3 days)
+      - username not empty
+    """
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return []
+    if cutoff is None:
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT telegram_user_id, username
+                FROM broadcast_targets
+                WHERE
+                    is_sent = TRUE
+                    AND COALESCE(click_count, 0) = 0
+                    AND retry_sent = FALSE
+                    AND sent_at IS NOT NULL
+                    AND sent_at <= %s
+                    AND username IS NOT NULL
+                    AND username <> ''
+                ORDER BY sent_at
+                """,
+                (cutoff,),
+            )
+            rows = cur.fetchall()
+        conn.close()
+        return [(int(r[0]), r[1]) for r in rows]
+    except Exception as e:
+        logger.warning("get_retry_targets failed: %s", e)
+        return []
+
+
+def mark_retry_sent(telegram_user_ids: list[int]) -> None:
+    """Mark given user IDs as retry_sent=TRUE."""
+    if not telegram_user_ids:
+        return
+    if not (os.getenv("DATABASE_URL") or "").strip():
+        return
+    try:
+        now = datetime.now(timezone.utc)
+        conn = _get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE broadcast_targets
+                    SET retry_sent = TRUE, retry_sent_at = %s
+                    WHERE telegram_user_id = ANY(%s)
+                    """,
+                    (now, telegram_user_ids),
+                )
+        conn.close()
+    except Exception as e:
+        logger.warning("mark_retry_sent failed: %s", e)
