@@ -79,9 +79,7 @@ def main() -> None:
 
     query = """
 mutation VariableCollectionUpsert($input: VariableCollectionUpsertInput!) {
-  variableCollectionUpsert(input: $input) {
-    id
-  }
+  variableCollectionUpsert(input: $input)
 }
 """.strip()
 
