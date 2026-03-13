@@ -223,9 +223,42 @@ async def broadcast_via_userbot(
                     client = acc["client"]
                     saved_msg_id = acc["saved_msg_id"]
 
+                    # 1) username을 peer로 먼저 resolve 해서 PEER_ID_INVALID 방지
+                    try:
+                        peer = await client.resolve_peer(username_clean)
+                    except FloodWait as e:
+                        wait = e.value + 5
+                        acc["cooldown_until"] = now + wait
+                        warn = (
+                            f"⚠️ [{acc['label']}] FloodWait {wait}초 (resolve_peer) — 계정 쿨다운 후 "
+                            f"다음 계정으로 로테이션."
+                        )
+                        logger.warning(warn)
+                        if notify_callback:
+                            await notify_callback(warn)
+                        continue
+                    except (PeerIdInvalid, UsernameNotOccupied, UsernameInvalid) as e:
+                        # username 기반으로도 peer를 찾지 못하는 유저 → 발송 불가, 재시도 대상에서 제외
+                        logger.warning("Skipping %s: %s", target, e)
+                        skipped += 1
+                        delivered = True
+                        batch_done.append(uid)
+                        break
+                    except RPCError as e:
+                        failed += 1
+                        logger.error("RPCError (resolve_peer) for %s: %s", target, e)
+                        delivered = True
+                        break
+                    except Exception as e:
+                        failed += 1
+                        logger.error("Unexpected error (resolve_peer) for %s: %s", target, e)
+                        delivered = True
+                        break
+
+                    # 2) resolve된 peer로 메시지 복사
                     try:
                         await client.copy_message(
-                            chat_id=target,
+                            chat_id=peer,
                             from_chat_id="me",
                             message_id=saved_msg_id,
                             caption=user_caption,
