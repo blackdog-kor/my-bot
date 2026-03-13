@@ -11,6 +11,10 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# Railway 배포 환경 모듈 경로 (app.pg_broadcast, app.scheduler 등)
+sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
