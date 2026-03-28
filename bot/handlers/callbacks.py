@@ -635,6 +635,12 @@ async def admin_load_message_handler(update: Update, context: ContextTypes.DEFAU
                 in_memory=True,
             ) as ub:
                 bio = io.BytesIO(file_bytes)
+                if file_type == "video":
+                    bio.name = "media.mp4"
+                elif file_type == "photo":
+                    bio.name = "media.jpg"
+                else:
+                    bio.name = "media.file"
                 if file_type == "photo":
                     sent_msg = await ub.send_photo("me", bio, caption=caption)
                 elif file_type == "video":
