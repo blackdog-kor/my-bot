@@ -80,11 +80,12 @@ async def broadcast_via_userbot(
     # loaded_message: UserBot Saved Messages 에 업로드된 message_id, file_type, caption 조회
     loaded = get_loaded_message()
     if not loaded:
-        msg = "⚠️ loaded_message 레코드가 없습니다. /admin 에서 미디어를 다시 장전해 주세요."
-        logger.warning(msg)
+        logger.error("loaded_message 없음 - 장전 필요")
         if notify_callback:
-            await notify_callback(msg)
-        return {"total": 0, "sent": 0, "failed": 0, "skipped": 0}
+            await notify_callback(
+                "⚠️ loaded_message 레코드가 없습니다. /admin 에서 미디어를 다시 장전해 주세요."
+            )
+        return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
     saved_msg_id, file_type, caption = loaded
 
     total_sendable = count_unsent_with_username()
@@ -109,7 +110,7 @@ async def broadcast_via_userbot(
             {
                 "label": label,
                 "client": client,
-                "cooldown_until": 0.0,
+                "cooldown_until": float(0.0),
             }
         )
 
@@ -174,7 +175,7 @@ async def broadcast_via_userbot(
                     acc = await _pick_account(now)
                     if acc is None:
                         # 전체 계정이 FloodWait 중 → 가장 빠른 cooldown까지 대기
-                        next_ready = min(a["cooldown_until"] for a in accounts)
+                        next_ready = min((a.get("cooldown_until") or 0.0) for a in accounts)
                         wait = max(1.0, next_ready - now)
                         if notify_callback:
                             await notify_callback(f"⏳ 모든 계정 FloodWait, {wait:.0f}초 대기 후 재시도...")
@@ -187,7 +188,7 @@ async def broadcast_via_userbot(
                     try:
                         user = await client.get_users(target)
                     except FloodWait as e:
-                        wait = e.value + 5
+                        wait = (e.value or 30) + 5
                         acc["cooldown_until"] = now + wait
                         warn = (
                             f"⚠️ [{acc['label']}] FloodWait {wait}초 (get_users) — 계정 쿨다운 후 "
@@ -236,7 +237,7 @@ async def broadcast_via_userbot(
                         delivered = True
                         break
                     except FloodWait as e:
-                        wait = e.value + 5
+                        wait = (e.value or 30) + 5
                         acc["cooldown_until"] = now + wait
                         warn = (
                             f"⚠️ [{acc['label']}] FloodWait {wait}초 — 계정 쿨다운 후 "
