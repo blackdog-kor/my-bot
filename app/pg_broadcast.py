@@ -1,580 +1,443 @@
-"""
-PostgreSQL broadcast_targets table interface (통합 서비스 공용).
-
-Table: broadcast_targets
-  telegram_user_id  BIGINT PRIMARY KEY
-  username          TEXT DEFAULT ''
-  source            TEXT DEFAULT 'scraper'
-  added_at          TIMESTAMPTZ DEFAULT NOW()
-  is_sent           BOOLEAN DEFAULT FALSE
-  sent_at           TIMESTAMPTZ
-  clicked_at        TIMESTAMPTZ
-  click_count       INTEGER DEFAULT 0
-  unique_ref        TEXT
-  retry_sent        BOOLEAN DEFAULT FALSE
-  retry_sent_at     TIMESTAMPTZ
-
-Requires env var: DATABASE_URL (PostgreSQL DSN)
-"""
-from __future__ import annotations
-
+import logging
 import os
 import sys
+from datetime import datetime, timezone
+
+import psycopg2
+
 sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import logging
-import os
-import time
-from datetime import datetime, timezone
-from typing import Generator
-
-import httpx
-
 logger = logging.getLogger(__name__)
 
-_DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
-
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
-ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
-ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 
 def _get_conn():
-    """Open a new psycopg2 connection. Caller must close it."""
-    import psycopg2
-    url = _DATABASE_URL or os.getenv("DATABASE_URL") or ""
-    if not url:
-        raise RuntimeError("DATABASE_URL is not set")
-    return psycopg2.connect(url)
+    return psycopg2.connect(DATABASE_URL)
 
 
-def ensure_pg_table() -> None:
-    """Create broadcast_targets table if it doesn't exist. Add columns if missing."""
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        logger.warning("DATABASE_URL not set — skipping PostgreSQL table setup")
-        return
+# ─────────────────────────────────────────────
+# broadcast_targets 테이블
+# ─────────────────────────────────────────────
+
+def ensure_pg_table():
     try:
         conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS broadcast_targets (
-                        telegram_user_id BIGINT PRIMARY KEY,
-                        username         TEXT        NOT NULL DEFAULT '',
-                        source           TEXT        NOT NULL DEFAULT 'scraper',
-                        added_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                        is_sent          BOOLEAN     NOT NULL DEFAULT FALSE,
-                        sent_at          TIMESTAMPTZ,
-                        clicked_at       TIMESTAMPTZ,
-                        click_count      INTEGER      NOT NULL DEFAULT 0,
-                        unique_ref       TEXT,
-                        retry_sent       BOOLEAN      NOT NULL DEFAULT FALSE,
-                        retry_sent_at    TIMESTAMPTZ
-                    )
-                """)
-                for alter_sql in (
-                    "ALTER TABLE broadcast_targets ADD COLUMN clicked_at TIMESTAMPTZ",
-                    "ALTER TABLE broadcast_targets ADD COLUMN click_count INTEGER NOT NULL DEFAULT 0",
-                    "ALTER TABLE broadcast_targets ADD COLUMN unique_ref TEXT",
-                    "ALTER TABLE broadcast_targets ADD COLUMN retry_sent BOOLEAN NOT NULL DEFAULT FALSE",
-                    "ALTER TABLE broadcast_targets ADD COLUMN retry_sent_at TIMESTAMPTZ",
-                ):
-                    try:
-                        cur.execute(alter_sql)
-                    except Exception:
-                        pass
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS broadcast_targets (
+                telegram_user_id BIGINT PRIMARY KEY,
+                username         TEXT,
+                source           TEXT,
+                added_at         TIMESTAMPTZ DEFAULT NOW(),
+                is_sent          BOOLEAN     DEFAULT FALSE,
+                sent_at          TIMESTAMPTZ,
+                clicked_at       TIMESTAMPTZ,
+                click_count      INTEGER     DEFAULT 0,
+                unique_ref       TEXT,
+                retry_sent       BOOLEAN     DEFAULT FALSE,
+                retry_sent_at    TIMESTAMPTZ
+            )
+        """)
+        conn.commit()
+
+        # 기존 테이블에 컬럼이 없을 수 있으므로 ALTER로 추가
+        extra_columns = [
+            ("clicked_at",    "TIMESTAMPTZ"),
+            ("click_count",   "INTEGER DEFAULT 0"),
+            ("unique_ref",    "TEXT"),
+            ("retry_sent",    "BOOLEAN DEFAULT FALSE"),
+            ("retry_sent_at", "TIMESTAMPTZ"),
+        ]
+        for col_name, col_type in extra_columns:
+            try:
+                cur.execute(
+                    f"ALTER TABLE broadcast_targets ADD COLUMN {col_name} {col_type}"
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+        cur.close()
         conn.close()
-        logger.info("broadcast_targets table ready")
+        logger.info("ensure_pg_table: OK")
     except Exception as e:
         logger.warning("ensure_pg_table failed: %s", e)
 
 
-def ensure_loaded_message_table() -> None:
-    """Create loaded_message table (for media metadata) if it doesn't exist.
-
-    Schema (PostgreSQL, app-level):
-      - id: always 1
-      - userbot_message_id: INTEGER (Pyrogram UserBot Saved Messages message_id)
-      - file_type: 'photo' | 'video' | 'document'
-      - caption: TEXT
-    """
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        logger.warning("DATABASE_URL not set — skipping loaded_message table setup")
+def save_broadcast_batch(users: list[tuple[int, str, str]]):
+    """users: [(telegram_user_id, username, source), ...]"""
+    if not users:
         return
     try:
         conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                # 기본 테이블 생성
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS loaded_message (
-                        id                 INTEGER PRIMARY KEY DEFAULT 1,
-                        userbot_message_id INTEGER,
-                        file_type          TEXT,
-                        caption            TEXT,
-                        updated_at         TIMESTAMPTZ DEFAULT NOW()
-                    )
-                    """
-                )
-                # 기존 인스턴스에서 컬럼이 없을 수 있으므로 안전하게 ADD COLUMN 시도
-                for alter_sql in (
-                    "ALTER TABLE loaded_message ADD COLUMN userbot_message_id INTEGER",
-                    "ALTER TABLE loaded_message ADD COLUMN file_type TEXT",
-                    "ALTER TABLE loaded_message ADD COLUMN caption TEXT",
-                    "ALTER TABLE loaded_message ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW()",
-                ):
-                    try:
-                        cur.execute(alter_sql)
-                    except Exception:
-                        pass
-        conn.close()
-        logger.info("loaded_message table ready")
-    except Exception as e:
-        logger.warning("ensure_loaded_message_table failed: %s", e)
-
-
-def upsert_user(telegram_user_id: int, username: str = "", source: str = "bot") -> None:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return
-    try:
-        conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO broadcast_targets (telegram_user_id, username, source)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (telegram_user_id) DO NOTHING
-                """, (telegram_user_id, username or "", source))
-        conn.close()
-    except Exception as e:
-        logger.warning("upsert_user(%s) failed: %s", telegram_user_id, e)
-
-
-def save_broadcast_batch(entries: list[tuple[int, str, str]]) -> int:
-    """Batch upsert (telegram_user_id, username, source). ON CONFLICT DO UPDATE for empty username. Returns affected count."""
-    if not entries or not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
-    n = 0
-    try:
-        conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                for uid, username, source in entries:
-                    cur.execute("""
-                        INSERT INTO broadcast_targets (telegram_user_id, username, source)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (telegram_user_id) DO UPDATE
-                        SET username = EXCLUDED.username, source = EXCLUDED.source
-                        WHERE broadcast_targets.username IS NULL OR broadcast_targets.username = ''
-                           OR broadcast_targets.username <> EXCLUDED.username
-                    """, (uid, username or "", source or "scraper"))
-                    n += cur.rowcount
+        cur = conn.cursor()
+        cur.executemany("""
+            INSERT INTO broadcast_targets (telegram_user_id, username, source)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (telegram_user_id) DO UPDATE
+                SET username = EXCLUDED.username,
+                    source   = EXCLUDED.source
+        """, users)
+        conn.commit()
+        cur.close()
         conn.close()
     except Exception as e:
         logger.warning("save_broadcast_batch failed: %s", e)
-    return n
 
 
-def get_unsent_user_ids(limit: int = 0) -> list[int]:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return []
+def get_unsent_users(limit: int = 500) -> list[tuple[int, str]]:
+    """(telegram_user_id, username) 목록 반환"""
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            if limit > 0:
-                cur.execute(
-                    "SELECT telegram_user_id FROM broadcast_targets WHERE is_sent = FALSE ORDER BY added_at LIMIT %s",
-                    (limit,)
-                )
-            else:
-                cur.execute(
-                    "SELECT telegram_user_id FROM broadcast_targets WHERE is_sent = FALSE ORDER BY added_at"
-                )
-            rows = cur.fetchall()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT telegram_user_id, username
+            FROM broadcast_targets
+            WHERE is_sent = FALSE
+              AND username IS NOT NULL
+              AND username <> ''
+            ORDER BY added_at
+            LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
-        return [row[0] for row in rows]
-    except Exception as e:
-        logger.warning("get_unsent_user_ids failed: %s", e)
-        return []
-
-
-def get_unsent_users(limit: int = 0) -> list[tuple[int, str]]:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return []
-    try:
-        conn = _get_conn()
-        with conn.cursor() as cur:
-            sql = """
-                SELECT telegram_user_id, username
-                FROM broadcast_targets
-                WHERE is_sent = FALSE AND username IS NOT NULL AND username != ''
-                ORDER BY added_at
-            """
-            if limit > 0:
-                cur.execute(sql + " LIMIT %s", (limit,))
-            else:
-                cur.execute(sql)
-            rows = cur.fetchall()
-        conn.close()
-        return [(int(row[0]), row[1]) for row in rows]
+        return rows
     except Exception as e:
         logger.warning("get_unsent_users failed: %s", e)
         return []
 
 
 def count_unsent_with_username() -> int:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = FALSE AND username IS NOT NULL AND username != ''"
-            )
-            row = cur.fetchone()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COUNT(*) FROM broadcast_targets
+            WHERE is_sent = FALSE
+              AND username IS NOT NULL
+              AND username <> ''
+        """)
+        count = cur.fetchone()[0]
+        cur.close()
         conn.close()
-        return int(row[0]) if row else 0
+        return count
     except Exception as e:
         logger.warning("count_unsent_with_username failed: %s", e)
         return 0
 
 
-def purge_no_username(dry_run: bool = False) -> int:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
-    try:
-        conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                if dry_run:
-                    cur.execute(
-                        "SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = FALSE AND (username IS NULL OR username = '')"
-                    )
-                    row = cur.fetchone()
-                    count = int(row[0]) if row else 0
-                else:
-                    cur.execute(
-                        "UPDATE broadcast_targets SET is_sent = TRUE WHERE is_sent = FALSE AND (username IS NULL OR username = '')"
-                    )
-                    count = cur.rowcount
-        conn.close()
-        return count
-    except Exception as e:
-        logger.warning("purge_no_username failed: %s", e)
-        return 0
-
-
-def get_all_pg_user_ids() -> list[int]:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return []
-    try:
-        conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT telegram_user_id FROM broadcast_targets ORDER BY added_at")
-            rows = cur.fetchall()
-        conn.close()
-        return [row[0] for row in rows]
-    except Exception as e:
-        logger.warning("get_all_pg_user_ids failed: %s", e)
-        return []
-
-
-def mark_sent(telegram_user_ids: list[int]) -> None:
-    if not telegram_user_ids or not (os.getenv("DATABASE_URL") or "").strip():
-        return
-    try:
-        now = datetime.now(timezone.utc)
-        conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE broadcast_targets
-                    SET is_sent = TRUE, sent_at = %s
-                    WHERE telegram_user_id = ANY(%s)
-                """, (now, telegram_user_ids))
-        conn.close()
-    except Exception as e:
-        logger.warning("mark_sent failed: %s", e)
-
-
-def reset_all_sent_flags() -> int:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
-    try:
-        conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE broadcast_targets SET is_sent = FALSE, sent_at = NULL")
-                count = cur.rowcount
-        conn.close()
-        return count
-    except Exception as e:
-        logger.warning("reset_all_sent_flags failed: %s", e)
-        return 0
-
-
-def count_unsent() -> int:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
-    try:
-        conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = FALSE")
-            row = cur.fetchone()
-        conn.close()
-        return int(row[0]) if row else 0
-    except Exception as e:
-        logger.warning("count_unsent failed: %s", e)
-        return 0
-
-
 def count_total() -> int:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM broadcast_targets")
-            row = cur.fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM broadcast_targets")
+        count = cur.fetchone()[0]
+        cur.close()
         conn.close()
-        return int(row[0]) if row else 0
+        return count
     except Exception as e:
         logger.warning("count_total failed: %s", e)
         return 0
 
 
-def generate_unique_ref(telegram_user_id: int) -> str:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return ""
-    ref = f"{telegram_user_id}_{int(time.time() * 1000)}"
+def mark_sent(user_ids: list[int]):
+    if not user_ids:
+        return
     try:
         conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE broadcast_targets SET unique_ref = %s WHERE telegram_user_id = %s",
-                    (ref, telegram_user_id),
-                )
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE broadcast_targets
+            SET is_sent = TRUE, sent_at = NOW()
+            WHERE telegram_user_id = ANY(%s)
+        """, (user_ids,))
+        conn.commit()
+        cur.close()
         conn.close()
     except Exception as e:
-        logger.warning("generate_unique_ref(%s) failed: %s", telegram_user_id, e)
-    return ref
+        logger.warning("mark_sent failed: %s", e)
 
 
-def _notify_click(telegram_user_id: int, username: str, click_count: int, clicked_at: datetime) -> None:
-    if not BOT_TOKEN or not ADMIN_ID:
+def generate_unique_ref(user_id: int) -> str:
+    ts = int(datetime.now(timezone.utc).timestamp())
+    return f"{user_id}_{ts}"
+
+
+def mark_clicked(ref: str):
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE broadcast_targets
+            SET click_count = COALESCE(click_count, 0) + 1,
+                clicked_at  = NOW()
+            WHERE unique_ref = %s
+        """, (ref,))
+        conn.commit()
+
+        # 관리자 알림
+        cur.execute("""
+            SELECT telegram_user_id, username, click_count
+            FROM broadcast_targets
+            WHERE unique_ref = %s
+        """, (ref,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row:
+            _notify_click(row[0], row[1], row[2])
+    except Exception as e:
+        logger.warning("mark_clicked failed: %s", e)
+
+
+def _notify_click(user_id: int, username: str, click_count: int):
+    import httpx
+    bot_token = os.getenv("BOT_TOKEN", "")
+    admin_id  = os.getenv("ADMIN_ID", "")
+    if not bot_token or not admin_id:
         return
     text = (
-        "🎯 클릭 발생!\n"
-        f"유저ID: {telegram_user_id}\n"
-        f"username: @{username or '-'}\n"
-        f"클릭횟수: {click_count}회\n"
-        f"시각: {clicked_at.isoformat()}"
+        f"🎯 클릭 발생!\n"
+        f"유저ID: {user_id}\n"
+        f"username: @{username}\n"
+        f"클릭횟수: {click_count}회"
     )
     try:
-        with httpx.Client(timeout=10) as hc:
-            hc.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": ADMIN_ID, "text": text, "disable_web_page_preview": True},
-            )
+        httpx.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": admin_id, "text": text},
+            timeout=10,
+        )
     except Exception as e:
-        logger.warning("click notify failed: %s", e)
-
-
-def mark_clicked(ref: str) -> None:
-    if not ref or not (os.getenv("DATABASE_URL") or "").strip():
-        return
-    try:
-        now = datetime.now(timezone.utc)
-        conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE broadcast_targets
-                    SET click_count = COALESCE(click_count, 0) + 1, clicked_at = %s
-                    WHERE unique_ref = %s
-                    RETURNING telegram_user_id, username, click_count, clicked_at
-                """, (now, ref))
-                row = cur.fetchone()
-        conn.close()
-        if row:
-            telegram_user_id, username, click_count, clicked_at = row
-            _notify_click(int(telegram_user_id), username or "", int(click_count), clicked_at or now)
-    except Exception as e:
-        logger.warning("mark_clicked(%s) failed: %s", ref, e)
+        logger.warning("_notify_click failed: %s", e)
 
 
 def get_campaign_stats() -> dict:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return {"total_targets": 0, "total_sent": 0, "total_clicked": 0, "click_rate": 0.0, "pending": 0}
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM broadcast_targets")
-            total_targets = int(cur.fetchone()[0] or 0)
-            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = TRUE")
-            total_sent = int(cur.fetchone()[0] or 0)
-            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE click_count IS NOT NULL AND click_count > 0")
-            total_clicked = int(cur.fetchone()[0] or 0)
-            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE is_sent = FALSE")
-            pending = int(cur.fetchone()[0] or 0)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                COUNT(*)                                          AS total_targets,
+                COUNT(*) FILTER (WHERE is_sent = TRUE)           AS total_sent,
+                COUNT(*) FILTER (WHERE click_count > 0)          AS total_clicked,
+                COUNT(*) FILTER (WHERE is_sent = FALSE
+                                   AND username IS NOT NULL
+                                   AND username <> '')            AS pending
+            FROM broadcast_targets
+        """)
+        row = cur.fetchone()
+        cur.close()
         conn.close()
+        total_targets = row[0] or 0
+        total_sent    = row[1] or 0
+        total_clicked = row[2] or 0
+        pending       = row[3] or 0
+        click_rate    = round(total_clicked / total_sent * 100, 2) if total_sent > 0 else 0.0
+        return {
+            "total_targets": total_targets,
+            "total_sent":    total_sent,
+            "total_clicked": total_clicked,
+            "click_rate":    click_rate,
+            "pending":       pending,
+        }
     except Exception as e:
         logger.warning("get_campaign_stats failed: %s", e)
-        return {"total_targets": 0, "total_sent": 0, "total_clicked": 0, "click_rate": 0.0, "pending": 0}
-    click_rate = (total_clicked / total_sent * 100.0) if total_sent > 0 else 0.0
-    return {
-        "total_targets": total_targets,
-        "total_sent": total_sent,
-        "total_clicked": total_clicked,
-        "click_rate": round(click_rate, 2),
-        "pending": pending,
-    }
+        return {"total_targets": 0, "total_sent": 0, "total_clicked": 0,
+                "click_rate": 0.0, "pending": 0}
+
+
+def get_retry_targets(cutoff: datetime | None = None) -> list[tuple[int, str]]:
+    if cutoff is None:
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT telegram_user_id, username
+            FROM broadcast_targets
+            WHERE is_sent      = TRUE
+              AND COALESCE(click_count, 0) = 0
+              AND retry_sent   = FALSE
+              AND sent_at     <= %s
+              AND username IS NOT NULL
+              AND username <> ''
+            ORDER BY sent_at
+        """, (cutoff,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning("get_retry_targets failed: %s", e)
+        return []
+
+
+def mark_retry_sent(user_ids: list[int]):
+    if not user_ids:
+        return
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE broadcast_targets
+            SET retry_sent = TRUE, retry_sent_at = NOW()
+            WHERE telegram_user_id = ANY(%s)
+        """, (user_ids,))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.warning("mark_retry_sent failed: %s", e)
+
+
+def purge_no_username():
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM broadcast_targets
+            WHERE username IS NULL OR username = ''
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.warning("purge_no_username failed: %s", e)
 
 
 def get_count_added_on_date(target_date) -> int:
-    """added_at 날짜가 target_date인 행 수 (일일 리포트용). target_date: date 객체."""
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM broadcast_targets WHERE (added_at AT TIME ZONE 'UTC')::date = %s",
-                (target_date,),
-            )
-            row = cur.fetchone()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COUNT(*) FROM broadcast_targets
+            WHERE DATE(added_at AT TIME ZONE 'UTC') = %s
+        """, (target_date,))
+        count = cur.fetchone()[0]
+        cur.close()
         conn.close()
-        return int(row[0]) if row else 0
+        return count
     except Exception as e:
         logger.warning("get_count_added_on_date failed: %s", e)
         return 0
 
 
 def get_count_clicked_on_date(target_date) -> int:
-    """clicked_at 날짜가 target_date인 행 수 (일일 리포트용). target_date: date 객체."""
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM broadcast_targets WHERE clicked_at IS NOT NULL AND (clicked_at AT TIME ZONE 'UTC')::date = %s",
-                (target_date,),
-            )
-            row = cur.fetchone()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COUNT(*) FROM broadcast_targets
+            WHERE DATE(clicked_at AT TIME ZONE 'UTC') = %s
+        """, (target_date,))
+        count = cur.fetchone()[0]
+        cur.close()
         conn.close()
-        return int(row[0]) if row else 0
+        return count
     except Exception as e:
         logger.warning("get_count_clicked_on_date failed: %s", e)
         return 0
 
 
 def get_retry_sent_count() -> int:
-    """retry_sent = TRUE 인 행 수."""
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return 0
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE retry_sent = TRUE")
-            row = cur.fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM broadcast_targets WHERE retry_sent = TRUE")
+        count = cur.fetchone()[0]
+        cur.close()
         conn.close()
-        return int(row[0]) if row else 0
+        return count
     except Exception as e:
         logger.warning("get_retry_sent_count failed: %s", e)
         return 0
 
 
-def save_loaded_message(userbot_message_id: int, file_type: str, caption: str) -> None:
-    """Upsert loaded_message row (always id=1) with UserBot Saved Messages message_id."""
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return
+# ─────────────────────────────────────────────
+# loaded_message 테이블 (UserBot Saved Messages ID 보관)
+# ─────────────────────────────────────────────
+
+def ensure_loaded_message_table():
     try:
         conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS loaded_message (
+                id                 INTEGER PRIMARY KEY DEFAULT 1,
+                userbot_message_id INTEGER,
+                file_type          TEXT,
+                caption            TEXT,
+                updated_at         TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+
+        # 기존 테이블에 컬럼 없을 경우 마이그레이션
+        columns_to_add = [
+            ("userbot_message_id", "INTEGER"),
+            ("file_type",          "TEXT"),
+            ("caption",            "TEXT"),
+            ("updated_at",         "TIMESTAMPTZ DEFAULT NOW()"),
+        ]
+        for col_name, col_type in columns_to_add:
+            try:
                 cur.execute(
-                    """
-                    INSERT INTO loaded_message (id, userbot_message_id, file_type, caption, updated_at)
-                    VALUES (1, %s, %s, %s, NOW())
-                    ON CONFLICT (id) DO UPDATE
-                    SET userbot_message_id = EXCLUDED.userbot_message_id,
-                        file_type          = EXCLUDED.file_type,
-                        caption            = EXCLUDED.caption,
-                        updated_at         = NOW()
-                    """,
-                    (int(userbot_message_id), file_type or "photo", caption or ""),
+                    f"ALTER TABLE loaded_message ADD COLUMN {col_name} {col_type}"
                 )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+        cur.close()
         conn.close()
+        logger.info("ensure_loaded_message_table: OK")
+    except Exception as e:
+        logger.warning("ensure_loaded_message_table failed: %s", e)
+
+
+def save_loaded_message(userbot_message_id: int, file_type: str, caption: str):
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO loaded_message (id, userbot_message_id, file_type, caption, updated_at)
+            VALUES (1, %s, %s, %s, NOW())
+            ON CONFLICT (id) DO UPDATE
+                SET userbot_message_id = EXCLUDED.userbot_message_id,
+                    file_type          = EXCLUDED.file_type,
+                    caption            = EXCLUDED.caption,
+                    updated_at         = NOW()
+        """, (userbot_message_id, file_type, caption))
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("save_loaded_message: OK (msg_id=%s)", userbot_message_id)
     except Exception as e:
         logger.warning("save_loaded_message failed: %s", e)
 
 
-def get_loaded_message() -> tuple[int, str, str] | None:
-    """Return (userbot_message_id, file_type, caption) from PostgreSQL loaded_message, or None."""
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return None
+def get_loaded_message():
+    """Returns (userbot_message_id, file_type, caption) or None"""
     try:
         conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT userbot_message_id, file_type, caption FROM loaded_message WHERE id = 1"
-            )
-            row = cur.fetchone()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT userbot_message_id, file_type, caption
+            FROM loaded_message
+            WHERE id = 1
+        """)
+        row = cur.fetchone()
+        cur.close()
         conn.close()
-        if not row:
+        if row is None or row[0] is None:
             return None
-        msg_id = row[0]
-        file_type = row[1] or "photo"
-        caption = row[2] or ""
-        if msg_id is None:
-            return None
-        return int(msg_id), file_type, caption
+        return (int(row[0]), row[1] or "photo", row[2] or "")
     except Exception as e:
         logger.warning("get_loaded_message failed: %s", e)
         return None
-
-
-def get_retry_targets(cutoff: datetime | None = None) -> list[tuple[int, str]]:
-    if not (os.getenv("DATABASE_URL") or "").strip():
-        return []
-    if cutoff is None:
-        from datetime import timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
-    try:
-        conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT telegram_user_id, username
-                FROM broadcast_targets
-                WHERE is_sent = TRUE AND COALESCE(click_count, 0) = 0 AND retry_sent = FALSE
-                  AND sent_at IS NOT NULL AND sent_at <= %s
-                  AND username IS NOT NULL AND username <> ''
-                ORDER BY sent_at
-            """, (cutoff,))
-            rows = cur.fetchall()
-        conn.close()
-        return [(int(r[0]), r[1]) for r in rows]
-    except Exception as e:
-        logger.warning("get_retry_targets failed: %s", e)
-        return []
-
-
-def mark_retry_sent(telegram_user_ids: list[int]) -> None:
-    if not telegram_user_ids or not (os.getenv("DATABASE_URL") or "").strip():
-        return
-    try:
-        now = datetime.now(timezone.utc)
-        conn = _get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE broadcast_targets SET retry_sent = TRUE, retry_sent_at = %s
-                    WHERE telegram_user_id = ANY(%s)
-                """, (now, telegram_user_ids))
-        conn.close()
-    except Exception as e:
-        logger.warning("mark_retry_sent failed: %s", e)
