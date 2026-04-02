@@ -101,6 +101,23 @@ COMPETITOR_USER_COLUMNS = {
     "scraped_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+PRODUCT_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "product_id": "TEXT NOT NULL DEFAULT ''",
+    "source": "TEXT NOT NULL DEFAULT 'aliexpress'",
+    "url": "TEXT NOT NULL DEFAULT ''",
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "price": "TEXT NOT NULL DEFAULT ''",
+    "original_price": "TEXT NOT NULL DEFAULT ''",
+    "discount_percent": "INTEGER NOT NULL DEFAULT 0",
+    "rating": "TEXT NOT NULL DEFAULT ''",
+    "sales_count": "TEXT NOT NULL DEFAULT ''",
+    "promo_info": "TEXT NOT NULL DEFAULT ''",
+    "meta_json": "TEXT NOT NULL DEFAULT '{}'",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def _connect():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -245,6 +262,21 @@ def ensure_db() -> None:
     for column_name, column_type in COMPETITOR_USER_COLUMNS.items():
         if column_name not in existing_competitor_users:
             cur.execute(f"ALTER TABLE competitor_users ADD COLUMN {column_name} {column_type}")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT
+        )
+        """
+    )
+
+    cur.execute("PRAGMA table_info(products)")
+    existing_products = {row[1] for row in cur.fetchall()}
+
+    for column_name, column_type in PRODUCT_COLUMNS.items():
+        if column_name not in existing_products:
+            cur.execute(f"ALTER TABLE products ADD COLUMN {column_name} {column_type}")
 
     conn.commit()
     conn.close()
@@ -1029,3 +1061,180 @@ def export_competitor_users_csv() -> str:
         writer.writerow([str(c) for c in row])
 
     return "\ufeff" + buf.getvalue()
+
+
+def create_product(
+    product_id: str,
+    source: str,
+    url: str,
+    title: str,
+    price: str,
+    original_price: str = "",
+    discount_percent: int = 0,
+    rating: str = "",
+    sales_count: str = "",
+    promo_info: str = "",
+    meta_json: str = "{}",
+) -> int:
+    """
+    Create or update a product entry in the products table.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+
+    now = datetime.utcnow().isoformat()
+
+    # Check if product already exists
+    cur.execute(
+        "SELECT id FROM products WHERE product_id = ? AND source = ?",
+        (product_id, source),
+    )
+    existing = cur.fetchone()
+
+    if existing:
+        # Update existing product
+        cur.execute(
+            """
+            UPDATE products SET
+                url = ?,
+                title = ?,
+                price = ?,
+                original_price = ?,
+                discount_percent = ?,
+                rating = ?,
+                sales_count = ?,
+                promo_info = ?,
+                meta_json = ?,
+                updated_at = ?
+            WHERE product_id = ? AND source = ?
+            """,
+            (
+                url,
+                title,
+                price,
+                original_price,
+                discount_percent,
+                rating,
+                sales_count,
+                promo_info,
+                meta_json,
+                now,
+                product_id,
+                source,
+            ),
+        )
+        row_id = existing[0]
+    else:
+        # Insert new product
+        cur.execute(
+            """
+            INSERT INTO products (
+                product_id, source, url, title, price, original_price,
+                discount_percent, rating, sales_count, promo_info,
+                meta_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                product_id,
+                source,
+                url,
+                title,
+                price,
+                original_price,
+                discount_percent,
+                rating,
+                sales_count,
+                promo_info,
+                meta_json,
+                now,
+                now,
+            ),
+        )
+        row_id = cur.lastrowid
+
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def get_product_by_id(product_id: str, source: str = "aliexpress"):
+    """
+    Retrieve a product by its product_id and source.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, product_id, source, url, title, price, original_price,
+               discount_percent, rating, sales_count, promo_info,
+               meta_json, created_at, updated_at
+        FROM products
+        WHERE product_id = ? AND source = ?
+        """,
+        (product_id, source),
+    )
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "product_id": row[1],
+        "source": row[2],
+        "url": row[3],
+        "title": row[4],
+        "price": row[5],
+        "original_price": row[6],
+        "discount_percent": row[7],
+        "rating": row[8],
+        "sales_count": row[9],
+        "promo_info": row[10],
+        "meta_json": row[11],
+        "created_at": row[12],
+        "updated_at": row[13],
+    }
+
+
+def list_products(limit: int = 100, offset: int = 0):
+    """
+    List all products with pagination.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, product_id, source, url, title, price, original_price,
+               discount_percent, rating, sales_count, promo_info,
+               meta_json, created_at, updated_at
+        FROM products
+        ORDER BY updated_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    products = []
+    for row in rows:
+        products.append({
+            "id": row[0],
+            "product_id": row[1],
+            "source": row[2],
+            "url": row[3],
+            "title": row[4],
+            "price": row[5],
+            "original_price": row[6],
+            "discount_percent": row[7],
+            "rating": row[8],
+            "sales_count": row[9],
+            "promo_info": row[10],
+            "meta_json": row[11],
+            "created_at": row[12],
+            "updated_at": row[13],
+        })
+
+    return products
