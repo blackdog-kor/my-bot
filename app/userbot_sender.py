@@ -81,11 +81,20 @@ async def _upload_to_saved_messages(
     file_type: str,
     caption: str,
     label: str = "?",
+    notify=None,
 ) -> int:
     """각 세션의 Saved Messages에 미디어를 업로드하고 message_id 반환.
 
     호출 전에 client.start() + get_me() 검증이 완료된 상태여야 한다.
+    notify: async callable(str) — 실패 상세를 관리자 DM으로 전송하는 콜백.
     """
+    async def _dm(msg: str) -> None:
+        if notify:
+            try:
+                await notify(msg)
+            except Exception:
+                pass
+
     logger.info(
         "[upload] label=%s | file_type=%s | file_size=%d bytes",
         label, file_type, len(file_bytes),
@@ -105,8 +114,14 @@ async def _upload_to_saved_messages(
                 height=0,
                 supports_streaming=True,
             )
-        except Exception:
-            logger.warning("[%s] send_video 실패 → send_document 로 재시도", label)
+        except Exception as e:
+            await _dm(
+                f"⚠️ send_video 실패 → send_document 재시도\n"
+                f"계정: {label}\n"
+                f"에러타입: {type(e).__name__}\n"
+                f"에러내용: {e}"
+            )
+            logger.warning("[%s] send_video 실패 → send_document 로 재시도: %s", label, e)
             bio = io.BytesIO(file_bytes)
             bio.seek(0)
             bio.name = "media.mp4"
@@ -115,8 +130,14 @@ async def _upload_to_saved_messages(
         bio.name = "media.jpg"
         try:
             sent = await client.send_photo("me", bio, caption=caption)
-        except Exception:
-            logger.warning("[%s] send_photo 실패 → send_document 로 재시도", label)
+        except Exception as e:
+            await _dm(
+                f"⚠️ send_photo 실패 → send_document 재시도\n"
+                f"계정: {label}\n"
+                f"에러타입: {type(e).__name__}\n"
+                f"에러내용: {e}"
+            )
+            logger.warning("[%s] send_photo 실패 → send_document 로 재시도: %s", label, e)
             bio = io.BytesIO(file_bytes)
             bio.seek(0)
             bio.name = "media.jpg"
@@ -232,13 +253,19 @@ async def broadcast_via_userbot(
             msg_id = await _upload_to_saved_messages(
                 acc["client"], file_bytes, file_type, caption,
                 label=acc["label"],
+                notify=_notify,
             )
             acc["msg_id"] = msg_id
             valid_accounts.append(acc)
             logger.info("%s 업로드 완료 (msg_id=%d)", acc["label"], msg_id)
-        except Exception:
+        except Exception as e:
             logger.exception("%s 업로드 실패", acc["label"])
-            await _notify(f"⚠️ {acc['label']} 업로드 실패 — 건너뜀")
+            await _notify(
+                f"❌ 업로드 실패 상세\n"
+                f"계정: {acc['label']}\n"
+                f"에러타입: {type(e).__name__}\n"
+                f"에러내용: {e}"
+            )
 
     if not valid_accounts:
         await _notify("❌ 미디어 업로드에 성공한 계정이 없습니다.")
