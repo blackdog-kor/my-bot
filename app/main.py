@@ -105,13 +105,21 @@ def track(ref: str):
 
 
 @app.get("/debug/dm-test")
-async def debug_dm_test(username: str = ""):
+async def debug_dm_test(username: str = "", user_id: int = 0):
     """
-    특정 username에게 테스트 텍스트 메시지를 발송해 실제 DM 전달 여부를 확인.
-    사용법: /debug/dm-test?username=your_username
+    테스트 DM 발송. username 또는 user_id 중 하나를 지정.
+    - /debug/dm-test?username=yourname
+    - /debug/dm-test?user_id=123456789
+    둘 다 지정 시 user_id 우선 사용.
     """
-    if not username:
-        return {"error": "username 파라미터가 필요합니다. 예: /debug/dm-test?username=yourusername"}
+    if not username and not user_id:
+        return {
+            "error": "username 또는 user_id 파라미터가 필요합니다.",
+            "examples": [
+                "/debug/dm-test?username=yourname",
+                "/debug/dm-test?user_id=123456789",
+            ],
+        }
 
     api_id   = int(os.getenv("API_ID",   "0") or "0")
     api_hash = (os.getenv("API_HASH") or "").strip()
@@ -136,8 +144,15 @@ async def debug_dm_test(username: str = ""):
     if not session_string:
         return {"error": "SESSION_STRING 환경변수가 없습니다."}
 
-    target = username.lstrip("@")
-    result: dict = {"session": session_label, "target": f"@{target}"}
+    # 발송 대상 결정: user_id 우선, 없으면 @username
+    if user_id:
+        peer   = user_id          # 정수 그대로 사용
+        target = str(user_id)
+    else:
+        target = username.lstrip("@")
+        peer   = f"@{target}"    # get_users로 해석 후 .id 사용
+
+    result: dict = {"session": session_label, "target": target, "mode": "user_id" if user_id else "username"}
 
     try:
         from pyrogram import Client as PyroClient
@@ -149,24 +164,36 @@ async def debug_dm_test(username: str = ""):
             session_string=session_string,
             in_memory=True,
         ) as client:
-            # username → user.id 해석
-            user_obj = await client.get_users(f"@{target}")
-            result["user_id"]  = user_obj.id
-            result["username"] = user_obj.username
-            result["name"]     = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+            # peer 해석: user_id면 바로 사용, username이면 get_users로 정수 ID 획득
+            if user_id:
+                chat_id = user_id
+                # user_id로도 get_users 시도해서 메타데이터 채움 (실패해도 발송은 시도)
+                try:
+                    user_obj = await client.get_users(user_id)
+                    result["resolved_username"] = user_obj.username
+                    result["name"] = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+                except Exception:
+                    pass
+            else:
+                user_obj = await client.get_users(peer)
+                chat_id  = user_obj.id
+                result["resolved_user_id"] = user_obj.id
+                result["resolved_username"] = user_obj.username
+                result["name"] = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
 
             # 텍스트 메시지 발송
             msg = await client.send_message(
-                user_obj.id,
+                chat_id,
                 "✅ [테스트] UserBot DM 발송 테스트입니다. 이 메시지가 보이면 정상입니다.",
             )
             result["status"]     = "ok"
             result["message_id"] = msg.id
+            result["chat_id"]    = chat_id
 
     except Exception as exc:
         result["status"] = "fail"
         result["error"]  = f"{type(exc).__name__}: {exc}"
-        logger.exception("dm-test 실패 [%s → @%s]", session_label, target)
+        logger.exception("dm-test 실패 [%s → %s]", session_label, target)
 
     return result
 
