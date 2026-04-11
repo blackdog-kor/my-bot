@@ -82,6 +82,18 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/routes")
+def debug_routes():
+    """현재 FastAPI에 등록된 모든 라우트 목록 반환 — 엔드포인트 존재 여부 확인용."""
+    return {
+        "routes": [
+            {"path": r.path, "methods": list(r.methods)}
+            for r in app.routes
+            if hasattr(r, "methods")
+        ]
+    }
+
+
 @app.get("/track/{ref}")
 def track(ref: str):
     try:
