@@ -82,19 +82,17 @@ async def _upload_to_saved_messages(
     caption: str,
     label: str = "?",
 ) -> int:
-    """각 세션의 Saved Messages에 미디어를 업로드하고 message_id 반환."""
+    """각 세션의 Saved Messages에 미디어를 업로드하고 message_id 반환.
+
+    호출 전에 client.start() + get_me() 검증이 완료된 상태여야 한다.
+    """
+    logger.info(
+        "[upload] label=%s | file_type=%s | file_size=%d bytes",
+        label, file_type, len(file_bytes),
+    )
+
     bio = io.BytesIO(file_bytes)
     bio.seek(0)
-
-    # ── 진단 로그 ──────────────────────────────────────────────────────────
-    bio.name = "media.mp4" if file_type == "video" else ("media.jpg" if file_type == "photo" else "media.file")
-    is_connected = await client.get_me() is not None
-    logger.info(
-        "[upload-diag] label=%s | file_type=%s | file_size=%d bytes | "
-        "bio.name=%s | pyrogram_connected=%s",
-        label, file_type, len(file_bytes), bio.name, is_connected,
-    )
-    # ───────────────────────────────────────────────────────────────────────
 
     if file_type == "video":
         bio.name = "media.mp4"
@@ -181,9 +179,14 @@ async def broadcast_via_userbot(
         f"대상: {total_unsent}명 | 계정 수: {len(sessions)} | DM 간격 {USER_DELAY_MIN}~{USER_DELAY_MAX}초"
     )
 
-    # ── 4. Pyrogram 클라이언트 초기화 및 시작 ──
-    accounts = []
+    # ── 4. Pyrogram 클라이언트 초기화 · 시작 · 연결 검증 ──
+    # all_started: start()까지 성공한 클라이언트 전원 (cleanup용)
+    # accounts:    start() + get_me() 모두 통과한 정상 계정만
+    all_started: list[dict] = []
+    accounts: list[dict]    = []
+
     for label, session_string in sessions:
+        client = None
         try:
             client = Client(
                 name=label,
@@ -192,37 +195,38 @@ async def broadcast_via_userbot(
                 session_string=session_string,
                 in_memory=True,
             )
-            accounts.append({
-                "label":          label,
-                "client":         client,
-                "cooldown_until": 0.0,
-                "msg_id":         None,
-            })
-        except Exception as e:
-            logger.warning("계정 초기화 실패 %s: %s", label, e)
+            await client.start()
+            all_started.append({"label": label, "client": client,
+                                 "cooldown_until": 0.0, "msg_id": None})
+
+            # 실제 API 호출로 세션 유효성 즉시 검증
+            me = await client.get_me()
+            logger.info("계정 연결 성공: %s (id=%s @%s)", label, me.id, me.username)
+            accounts.append(all_started[-1])
+
+        except Exception:
+            logger.exception("계정 시작/검증 실패: %s", label)
+            await _notify(f"⚠️ {label} 세션 만료 또는 연결 실패 — 건너뜀")
+            # start()에 성공했다면 즉시 정리
+            if client is not None and all_started and all_started[-1]["label"] == label:
+                try:
+                    await client.stop()
+                except Exception:
+                    pass
+                all_started.pop()
 
     if not accounts:
-        await _notify("❌ 사용 가능한 UserBot 계정이 없습니다.")
+        await _notify("❌ 정상 연결된 UserBot 계정이 없습니다.")
         return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
 
-    started = []
-    for acc in accounts:
-        try:
-            await acc["client"].start()
-            started.append(acc)
-            logger.info("계정 시작: %s", acc["label"])
-        except Exception as e:
-            logger.warning("계정 시작 실패 %s: %s", acc["label"], e)
-
-    if not started:
-        await _notify("❌ 시작된 UserBot 계정이 없습니다.")
-        return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
-
-    accounts = started
+    await _notify(
+        f"✅ 정상 계정 {len(accounts)}/{len(sessions)}개 준비됨 "
+        f"({', '.join(a['label'] for a in accounts)})"
+    )
 
     # ── 5. 각 세션의 Saved Messages에 업로드 ──
     await _notify("📤 각 계정 Saved Messages에 미디어 업로드 중...")
-    valid_accounts = []
+    valid_accounts: list[dict] = []
     for acc in accounts:
         try:
             msg_id = await _upload_to_saved_messages(
@@ -231,14 +235,14 @@ async def broadcast_via_userbot(
             )
             acc["msg_id"] = msg_id
             valid_accounts.append(acc)
-            logger.info("%s Saved Messages 업로드 완료 (msg_id=%d)", acc["label"], msg_id)
-        except Exception as e:
+            logger.info("%s 업로드 완료 (msg_id=%d)", acc["label"], msg_id)
+        except Exception:
             logger.exception("%s 업로드 실패", acc["label"])
+            await _notify(f"⚠️ {acc['label']} 업로드 실패 — 건너뜀")
 
     if not valid_accounts:
         await _notify("❌ 미디어 업로드에 성공한 계정이 없습니다.")
-        # 클라이언트 정리
-        for acc in accounts:
+        for acc in all_started:
             try:
                 await acc["client"].stop()
             except Exception:
@@ -414,12 +418,14 @@ async def broadcast_via_userbot(
 
     finally:
         # Saved Messages 정리 및 클라이언트 종료
-        for acc in accounts:
+        # valid_accounts(업로드 성공)만 msg_id 삭제, all_started 전원 stop
+        for acc in accounts:      # accounts == valid_accounts
             try:
                 if acc.get("msg_id"):
                     await acc["client"].delete_messages("me", acc["msg_id"])
             except Exception:
                 pass
+        for acc in all_started:   # 시작했던 모든 클라이언트 종료 (실패 포함)
             try:
                 await acc["client"].stop()
             except Exception:
