@@ -92,6 +92,70 @@ def track(ref: str):
     return RedirectResponse(url=AFFILIATE_URL, status_code=302)
 
 
+@app.get("/debug/session-test")
+async def debug_session_test():
+    """각 SESSION_STRING으로 Pyrogram 연결을 시도하고 성공/실패 결과를 반환."""
+    import asyncio
+
+    api_id   = int(os.getenv("API_ID",   "0") or "0")
+    api_hash = (os.getenv("API_HASH") or "").strip()
+
+    if not api_id or not api_hash:
+        return {"error": "API_ID 또는 API_HASH 환경변수가 설정되지 않았습니다."}
+
+    # 세션 목록 수집 (SESSION_STRING_1 ~ SESSION_STRING_10, 없으면 SESSION_STRING)
+    sessions: list[tuple[str, str]] = []
+    for i in range(1, 11):
+        key = f"SESSION_STRING_{i}"
+        val = (os.getenv(key) or "").strip()
+        if val:
+            sessions.append((key, val))
+    if not sessions:
+        val = (os.getenv("SESSION_STRING") or "").strip()
+        if val:
+            sessions.append(("SESSION_STRING", val))
+
+    if not sessions:
+        return {"error": "SESSION_STRING 환경변수가 설정되지 않았습니다."}
+
+    results: list[dict] = []
+
+    for label, session_string in sessions:
+        entry: dict = {"label": label, "session_length": len(session_string)}
+        try:
+            from pyrogram import Client as PyroClient
+
+            async with PyroClient(
+                name=f"test_{label}",
+                api_id=api_id,
+                api_hash=api_hash,
+                session_string=session_string,
+                in_memory=True,
+            ) as client:
+                me = await client.get_me()
+                entry["status"]   = "ok"
+                entry["user_id"]  = me.id
+                entry["username"] = me.username or "(없음)"
+                entry["name"]     = f"{me.first_name or ''} {me.last_name or ''}".strip()
+        except Exception as exc:
+            entry["status"] = "fail"
+            entry["error"]  = f"{type(exc).__name__}: {exc}"
+            logger.exception("session-test 실패 [%s]", label)
+
+        results.append(entry)
+
+    ok_count   = sum(1 for r in results if r["status"] == "ok")
+    fail_count = len(results) - ok_count
+    return {
+        "api_id":     api_id,
+        "api_hash":   api_hash[:6] + "..." if api_hash else "(없음)",
+        "total":      len(results),
+        "ok":         ok_count,
+        "failed":     fail_count,
+        "sessions":   results,
+    }
+
+
 @app.get("/debug/status")
 async def debug_status():
     # 1. loaded_message 확인

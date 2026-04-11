@@ -80,10 +80,22 @@ async def _upload_to_saved_messages(
     file_bytes: bytes,
     file_type: str,
     caption: str,
+    label: str = "?",
 ) -> int:
     """각 세션의 Saved Messages에 미디어를 업로드하고 message_id 반환."""
     bio = io.BytesIO(file_bytes)
     bio.seek(0)
+
+    # ── 진단 로그 ──────────────────────────────────────────────────────────
+    bio.name = "media.mp4" if file_type == "video" else ("media.jpg" if file_type == "photo" else "media.file")
+    is_connected = await client.get_me() is not None
+    logger.info(
+        "[upload-diag] label=%s | file_type=%s | file_size=%d bytes | "
+        "bio.name=%s | pyrogram_connected=%s",
+        label, file_type, len(file_bytes), bio.name, is_connected,
+    )
+    # ───────────────────────────────────────────────────────────────────────
+
     if file_type == "video":
         bio.name = "media.mp4"
         try:
@@ -96,8 +108,7 @@ async def _upload_to_saved_messages(
                 supports_streaming=True,
             )
         except Exception:
-            # send_video 실패 시 document 로 재시도
-            logger.warning("send_video 실패 → send_document 로 재시도")
+            logger.warning("[%s] send_video 실패 → send_document 로 재시도", label)
             bio = io.BytesIO(file_bytes)
             bio.seek(0)
             bio.name = "media.mp4"
@@ -107,7 +118,7 @@ async def _upload_to_saved_messages(
         try:
             sent = await client.send_photo("me", bio, caption=caption)
         except Exception:
-            logger.warning("send_photo 실패 → send_document 로 재시도")
+            logger.warning("[%s] send_photo 실패 → send_document 로 재시도", label)
             bio = io.BytesIO(file_bytes)
             bio.seek(0)
             bio.name = "media.jpg"
@@ -215,7 +226,8 @@ async def broadcast_via_userbot(
     for acc in accounts:
         try:
             msg_id = await _upload_to_saved_messages(
-                acc["client"], file_bytes, file_type, caption
+                acc["client"], file_bytes, file_type, caption,
+                label=acc["label"],
             )
             acc["msg_id"] = msg_id
             valid_accounts.append(acc)
