@@ -296,7 +296,7 @@ def mark_retry_sent(user_ids: list[int]):
         logger.warning("mark_retry_sent failed: %s", e)
 
 
-def purge_no_username():
+def purge_no_username() -> int:
     try:
         conn = _get_conn()
         cur = conn.cursor()
@@ -304,11 +304,14 @@ def purge_no_username():
             DELETE FROM broadcast_targets
             WHERE username IS NULL OR username = ''
         """)
+        count = cur.rowcount
         conn.commit()
         cur.close()
         conn.close()
+        return count
     except Exception as e:
         logger.warning("purge_no_username failed: %s", e)
+        return 0
 
 
 def get_count_added_on_date(target_date) -> int:
