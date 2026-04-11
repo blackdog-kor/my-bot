@@ -635,17 +635,32 @@ async def admin_load_message_handler(update: Update, context: ContextTypes.DEFAU
                 in_memory=True,
             ) as ub:
                 bio = io.BytesIO(file_bytes)
+                bio.seek(0)
                 if file_type == "video":
                     bio.name = "media.mp4"
+                    try:
+                        sent_msg = await ub.send_video(
+                            "me", bio, caption=caption,
+                            duration=0, width=0, height=0, supports_streaming=True,
+                        )
+                    except Exception:
+                        logger.warning("loader: send_video 실패 → send_document 재시도")
+                        bio = io.BytesIO(file_bytes)
+                        bio.seek(0)
+                        bio.name = "media.mp4"
+                        sent_msg = await ub.send_document("me", bio, caption=caption)
                 elif file_type == "photo":
                     bio.name = "media.jpg"
+                    try:
+                        sent_msg = await ub.send_photo("me", bio, caption=caption)
+                    except Exception:
+                        logger.warning("loader: send_photo 실패 → send_document 재시도")
+                        bio = io.BytesIO(file_bytes)
+                        bio.seek(0)
+                        bio.name = "media.jpg"
+                        sent_msg = await ub.send_document("me", bio, caption=caption)
                 else:
-                    bio.name = "media.file"
-                if file_type == "photo":
-                    sent_msg = await ub.send_photo("me", bio, caption=caption)
-                elif file_type == "video":
-                    sent_msg = await ub.send_video("me", bio, caption=caption)
-                else:
+                    bio.name = "media.mp4"
                     sent_msg = await ub.send_document("me", bio, caption=caption)
                 userbot_message_id = sent_msg.id
 
@@ -666,7 +681,7 @@ async def admin_load_message_handler(update: Update, context: ContextTypes.DEFAU
                 "API_ID/API_HASH/SESSION_STRING_1 not fully set — skipping UserBot upload for loaded_message"
             )
     except Exception as e:
-        logger.warning("UserBot loader failed while loading media: %s", e)
+        logger.exception("UserBot loader failed while loading media")
 
     # 사용자 피드백
     if file_type == "photo":

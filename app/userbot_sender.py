@@ -83,14 +83,37 @@ async def _upload_to_saved_messages(
 ) -> int:
     """각 세션의 Saved Messages에 미디어를 업로드하고 message_id 반환."""
     bio = io.BytesIO(file_bytes)
+    bio.seek(0)
     if file_type == "video":
         bio.name = "media.mp4"
-        sent = await client.send_video("me", bio, caption=caption)
+        try:
+            sent = await client.send_video(
+                "me", bio,
+                caption=caption,
+                duration=0,
+                width=0,
+                height=0,
+                supports_streaming=True,
+            )
+        except Exception:
+            # send_video 실패 시 document 로 재시도
+            logger.warning("send_video 실패 → send_document 로 재시도")
+            bio = io.BytesIO(file_bytes)
+            bio.seek(0)
+            bio.name = "media.mp4"
+            sent = await client.send_document("me", bio, caption=caption)
     elif file_type == "photo":
         bio.name = "media.jpg"
-        sent = await client.send_photo("me", bio, caption=caption)
+        try:
+            sent = await client.send_photo("me", bio, caption=caption)
+        except Exception:
+            logger.warning("send_photo 실패 → send_document 로 재시도")
+            bio = io.BytesIO(file_bytes)
+            bio.seek(0)
+            bio.name = "media.jpg"
+            sent = await client.send_document("me", bio, caption=caption)
     else:
-        bio.name = "media.file"
+        bio.name = "media.mp4"
         sent = await client.send_document("me", bio, caption=caption)
     return sent.id
 
@@ -198,7 +221,7 @@ async def broadcast_via_userbot(
             valid_accounts.append(acc)
             logger.info("%s Saved Messages 업로드 완료 (msg_id=%d)", acc["label"], msg_id)
         except Exception as e:
-            logger.warning("%s 업로드 실패: %s", acc["label"], e)
+            logger.exception("%s 업로드 실패", acc["label"])
 
     if not valid_accounts:
         await _notify("❌ 미디어 업로드에 성공한 계정이 없습니다.")
