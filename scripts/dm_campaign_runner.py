@@ -85,6 +85,9 @@ async def main() -> None:
     try:
         result = await broadcast_via_userbot(
             bot_token=BOT_TOKEN,
+            file_id=file_id,
+            file_type=file_type,
+            caption=caption,
             notify_callback=_notify,
         )
     except Exception as e:

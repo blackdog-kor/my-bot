@@ -508,6 +508,9 @@ async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
         from app.userbot_sender import broadcast_via_userbot
         result = await broadcast_via_userbot(
             bot_token=os.getenv("BOT_TOKEN", ""),
+            file_id=file_id,
+            file_type=file_type,
+            caption=caption,
             notify_callback=_notify,
         )
         return (
