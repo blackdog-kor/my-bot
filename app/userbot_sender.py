@@ -224,11 +224,12 @@ async def broadcast_via_userbot(
     # ── 헬퍼: 미디어 직접 발송 ──────────────────────────────────────────────
     async def _send_to_user(
         acc: dict,
-        target: str,
+        chat_id: int,          # 반드시 user.id 정수 — username 문자열 사용 금지
         user_caption: str,
     ) -> None:
         """
         미디어를 유저에게 직접 발송.
+        chat_id는 get_users()로 해석한 user.id 정수여야 한다.
         - cached_file_id 없음 → BytesIO 업로드 후 file_id 캐시
         - cached_file_id 있음 → 캐시된 file_id 재사용 (재업로드 없음)
         """
@@ -238,7 +239,7 @@ async def broadcast_via_userbot(
 
         if file_type == "video":
             msg = await client.send_video(
-                target, src,
+                chat_id, src,
                 caption=user_caption,
                 duration=0,
                 width=0,
@@ -251,7 +252,7 @@ async def broadcast_via_userbot(
 
         elif file_type == "photo":
             msg = await client.send_photo(
-                target, src,
+                chat_id, src,
                 caption=user_caption,
                 reply_markup=keyboard,
             )
@@ -260,7 +261,7 @@ async def broadcast_via_userbot(
 
         else:
             msg = await client.send_document(
-                target, src,
+                chat_id, src,
                 caption=user_caption,
                 reply_markup=keyboard,
             )
@@ -345,34 +346,74 @@ async def broadcast_via_userbot(
                         )
                         continue
 
+                    client: Client = acc["client"]
+
+                    # ── Step A: @username → user.id 해석 ────────────────────
                     try:
-                        await _send_to_user(acc, target, user_caption)
+                        user_obj = await client.get_users(target)
+                        user_id  = user_obj.id
+                        logger.info(
+                            "[get_users] %s → id=%s @%s (계정=%s)",
+                            target, user_id, user_obj.username, acc["label"],
+                        )
+                    except FloodWait as e:
+                        wait = int(e.value or 30) + 5
+                        acc["cooldown_until"] = time.time() + wait
+                        logger.warning("%s get_users FloodWait %d초", acc["label"], wait)
+                        await _notify(f"⚠️ {acc['label']} get_users FloodWait {wait}초")
+                        continue   # 다음 계정으로
+                    except SKIP_ERRORS as e:
+                        logger.info("skip %s (get_users): %s", target, type(e).__name__)
+                        skipped += 1
+                        delivered = True
+                        batch_done.append(uid)
+                        break
+                    except Exception as e:
+                        logger.exception("get_users 실패 %s", target)
+                        await _notify(
+                            f"❌ get_users 실패\n"
+                            f"계정: {acc['label']}\n"
+                            f"대상: {target}\n"
+                            f"에러타입: {type(e).__name__}\n"
+                            f"에러내용: {e}"
+                        )
+                        failed += 1
+                        delivered = True
+                        batch_done.append(uid)
+                        break
+
+                    # ── Step B: user.id 정수로 직접 발송 ────────────────────
+                    try:
+                        await _send_to_user(acc, user_id, user_caption)
                         sent += 1
                         delivered = True
                         batch_done.append(uid)
-                        logger.info("발송 성공: %s", target)
+                        logger.info(
+                            "✅ 발송 성공: %s (user_id=%s, db_uid=%s, 계정=%s, "
+                            "누적 sent=%d / skip=%d / fail=%d)",
+                            target, user_id, uid, acc["label"],
+                            sent, skipped, failed,
+                        )
 
                     except FloodWait as e:
                         wait = int(e.value or 30) + 5
                         acc["cooldown_until"] = time.time() + wait
-                        logger.warning("%s FloodWait %d초", acc["label"], wait)
-                        await _notify(
-                            f"⚠️ {acc['label']} FloodWait {wait}초 대기 중..."
-                        )
-                        # 쿨다운 → 다음 계정으로 계속 시도
+                        logger.warning("%s send FloodWait %d초", acc["label"], wait)
+                        await _notify(f"⚠️ {acc['label']} send FloodWait {wait}초")
+                        # 쿨다운 → 다음 계정으로 재시도
 
                     except SKIP_ERRORS as e:
-                        logger.info("skip %s: %s", target, type(e).__name__)
+                        logger.info("skip %s (send): %s", target, type(e).__name__)
                         skipped += 1
                         delivered = True
                         batch_done.append(uid)
 
                     except (RPCError, Exception) as e:
-                        logger.exception("발송 실패 %s", target)
+                        logger.exception("발송 실패 %s (user_id=%s)", target, user_id)
                         await _notify(
-                            f"❌ 업로드 실패 상세\n"
+                            f"❌ 발송 실패 상세\n"
                             f"계정: {acc['label']}\n"
-                            f"대상: {target}\n"
+                            f"대상: {target} (user_id={user_id})\n"
                             f"에러타입: {type(e).__name__}\n"
                             f"에러내용: {e}"
                         )

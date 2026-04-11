@@ -92,6 +92,73 @@ def track(ref: str):
     return RedirectResponse(url=AFFILIATE_URL, status_code=302)
 
 
+@app.get("/debug/dm-test")
+async def debug_dm_test(username: str = ""):
+    """
+    특정 username에게 테스트 텍스트 메시지를 발송해 실제 DM 전달 여부를 확인.
+    사용법: /debug/dm-test?username=your_username
+    """
+    if not username:
+        return {"error": "username 파라미터가 필요합니다. 예: /debug/dm-test?username=yourusername"}
+
+    api_id   = int(os.getenv("API_ID",   "0") or "0")
+    api_hash = (os.getenv("API_HASH") or "").strip()
+    if not api_id or not api_hash:
+        return {"error": "API_ID 또는 API_HASH가 설정되지 않았습니다."}
+
+    # 첫 번째 유효한 세션만 사용
+    session_string = ""
+    session_label  = ""
+    for i in range(1, 11):
+        key = f"SESSION_STRING_{i}"
+        val = (os.getenv(key) or "").strip()
+        if val:
+            session_string = val
+            session_label  = key
+            break
+    if not session_string:
+        val = (os.getenv("SESSION_STRING") or "").strip()
+        if val:
+            session_string = val
+            session_label  = "SESSION_STRING"
+    if not session_string:
+        return {"error": "SESSION_STRING 환경변수가 없습니다."}
+
+    target = username.lstrip("@")
+    result: dict = {"session": session_label, "target": f"@{target}"}
+
+    try:
+        from pyrogram import Client as PyroClient
+
+        async with PyroClient(
+            name=f"dmtest_{session_label}",
+            api_id=api_id,
+            api_hash=api_hash,
+            session_string=session_string,
+            in_memory=True,
+        ) as client:
+            # username → user.id 해석
+            user_obj = await client.get_users(f"@{target}")
+            result["user_id"]  = user_obj.id
+            result["username"] = user_obj.username
+            result["name"]     = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+
+            # 텍스트 메시지 발송
+            msg = await client.send_message(
+                user_obj.id,
+                "✅ [테스트] UserBot DM 발송 테스트입니다. 이 메시지가 보이면 정상입니다.",
+            )
+            result["status"]     = "ok"
+            result["message_id"] = msg.id
+
+    except Exception as exc:
+        result["status"] = "fail"
+        result["error"]  = f"{type(exc).__name__}: {exc}"
+        logger.exception("dm-test 실패 [%s → @%s]", session_label, target)
+
+    return result
+
+
 @app.get("/debug/session-test")
 async def debug_session_test():
     """각 SESSION_STRING으로 Pyrogram 연결을 시도하고 성공/실패 결과를 반환."""
