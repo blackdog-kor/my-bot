@@ -1,7 +1,22 @@
+"""
+UserBot 브로드캐스트 발송 (Pyrogram MTProto).
+
+발송 흐름:
+  1. Bot API getFile → BytesIO 다운로드
+  2. Pyrogram 세션 시작 + get_me() 즉시 검증 (만료 세션 조기 제거)
+  3. 유저별 직접 send_video/send_photo/send_document
+     - 계정당 첫 발송: BytesIO 업로드 → file_id 캐시
+     - 이후 발송: 캐시된 file_id 재사용 (재업로드 없음)
+  4. 실패 시 에러 상세를 admin DM으로 즉시 전송
+  5. finally: 시작된 모든 클라이언트 종료
+"""
+from __future__ import annotations
+
 import asyncio
 import io
 import logging
 import os
+import random
 import sys
 import time
 
@@ -10,54 +25,43 @@ import httpx
 sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pyrogram import Client
-from pyrogram.errors import (
-    FloodWait,
-    InputUserDeactivated,
-    PeerIdInvalid,
-    RPCError,
-    UserIsBlocked,
-    UserNotParticipant,
-    UserPrivacyRestricted,
-    UsernameInvalid,
-    UsernameNotOccupied,
-)
-
 logger = logging.getLogger(__name__)
 
-# ── 환경변수 ──────────────────────────────────
-API_ID   = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
+# ── 환경변수 ──────────────────────────────────────────────────────────────────
+API_ID   = int((os.getenv("API_ID")   or "0").strip())
+API_HASH = (os.getenv("API_HASH") or "").strip()
 
-# 딜레이 설정
-USER_DELAY_MIN   = int(os.getenv("USER_DELAY_MIN",   "3"))
-USER_DELAY_MAX   = int(os.getenv("USER_DELAY_MAX",   "7"))
-LONG_BREAK_EVERY = int(os.getenv("LONG_BREAK_EVERY", "50"))
-LONG_BREAK_MIN   = int(os.getenv("LONG_BREAK_MIN",   "300"))
-LONG_BREAK_MAX   = int(os.getenv("LONG_BREAK_MAX",   "600"))
-BATCH_SIZE       = int(os.getenv("BATCH_SIZE",       "50"))
+USER_DELAY_MIN   = float(os.getenv("USER_DELAY_MIN",   "3"))
+USER_DELAY_MAX   = float(os.getenv("USER_DELAY_MAX",   "7"))
+LONG_BREAK_EVERY = int(  os.getenv("LONG_BREAK_EVERY", "50"))
+LONG_BREAK_MIN   = float(os.getenv("LONG_BREAK_MIN",   "300"))
+LONG_BREAK_MAX   = float(os.getenv("LONG_BREAK_MAX",   "600"))
+BATCH_SIZE       = int(  os.getenv("BATCH_SIZE",        "50"))
 
-TRACKING_SERVER_URL = os.getenv("TRACKING_SERVER_URL", "").rstrip("/")
-AFFILIATE_URL       = os.getenv("AFFILIATE_URL", "")
+VIP_URL             = (os.getenv("VIP_URL") or "https://1wwtgq.com/?p=mskf").strip()
+AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "").strip()
+TRACKING_SERVER_URL = (os.getenv("TRACKING_SERVER_URL") or "").rstrip("/")
 
 
+# ── 세션 로더 ─────────────────────────────────────────────────────────────────
 def _load_sessions() -> list[tuple[str, str]]:
-    """SESSION_STRING_1 ~ SESSION_STRING_10 또는 SESSION_STRING 로드"""
-    sessions = []
+    """SESSION_STRING_1 ~ _10, 없으면 SESSION_STRING 로드."""
+    sessions: list[tuple[str, str]] = []
     for i in range(1, 11):
         key = f"SESSION_STRING_{i}"
-        val = os.getenv(key, "").strip()
+        val = (os.getenv(key) or "").strip()
         if val:
             sessions.append((key, val))
     if not sessions:
-        val = os.getenv("SESSION_STRING", "").strip()
+        val = (os.getenv("SESSION_STRING") or "").strip()
         if val:
             sessions.append(("SESSION_STRING", val))
     return sessions
 
 
-async def _download_via_bot_api(bot_token: str, file_id: str) -> bytes:
-    """Bot API를 통해 파일 다운로드 후 bytes 반환."""
+# ── Bot API 다운로드 ───────────────────────────────────────────────────────────
+async def _download_via_bot_api(bot_token: str, file_id: str) -> tuple[bytes, str]:
+    """Bot API getFile → 파일 bytes + remote_path 반환."""
     async with httpx.AsyncClient(timeout=120) as hc:
         r = await hc.get(
             f"https://api.telegram.org/bot{bot_token}/getFile",
@@ -66,88 +70,16 @@ async def _download_via_bot_api(bot_token: str, file_id: str) -> bytes:
         r.raise_for_status()
         data = r.json()
         if not data.get("ok"):
-            raise RuntimeError(f"getFile failed: {data}")
+            raise RuntimeError(f"getFile 실패: {data}")
         remote_path: str = data["result"]["file_path"]
         dl = await hc.get(
             f"https://api.telegram.org/file/bot{bot_token}/{remote_path}",
         )
         dl.raise_for_status()
-        return dl.content
+        return dl.content, remote_path
 
 
-async def _upload_to_saved_messages(
-    client: Client,
-    file_bytes: bytes,
-    file_type: str,
-    caption: str,
-    label: str = "?",
-    notify=None,
-) -> int:
-    """각 세션의 Saved Messages에 미디어를 업로드하고 message_id 반환.
-
-    호출 전에 client.start() + get_me() 검증이 완료된 상태여야 한다.
-    notify: async callable(str) — 실패 상세를 관리자 DM으로 전송하는 콜백.
-    """
-    async def _dm(msg: str) -> None:
-        if notify:
-            try:
-                await notify(msg)
-            except Exception:
-                pass
-
-    logger.info(
-        "[upload] label=%s | file_type=%s | file_size=%d bytes",
-        label, file_type, len(file_bytes),
-    )
-
-    bio = io.BytesIO(file_bytes)
-    bio.seek(0)
-
-    if file_type == "video":
-        bio.name = "media.mp4"
-        try:
-            sent = await client.send_video(
-                "me", bio,
-                caption=caption,
-                duration=0,
-                width=0,
-                height=0,
-                supports_streaming=True,
-            )
-        except Exception as e:
-            await _dm(
-                f"⚠️ send_video 실패 → send_document 재시도\n"
-                f"계정: {label}\n"
-                f"에러타입: {type(e).__name__}\n"
-                f"에러내용: {e}"
-            )
-            logger.warning("[%s] send_video 실패 → send_document 로 재시도: %s", label, e)
-            bio = io.BytesIO(file_bytes)
-            bio.seek(0)
-            bio.name = "media.mp4"
-            sent = await client.send_document("me", bio, caption=caption)
-    elif file_type == "photo":
-        bio.name = "media.jpg"
-        try:
-            sent = await client.send_photo("me", bio, caption=caption)
-        except Exception as e:
-            await _dm(
-                f"⚠️ send_photo 실패 → send_document 재시도\n"
-                f"계정: {label}\n"
-                f"에러타입: {type(e).__name__}\n"
-                f"에러내용: {e}"
-            )
-            logger.warning("[%s] send_photo 실패 → send_document 로 재시도: %s", label, e)
-            bio = io.BytesIO(file_bytes)
-            bio.seek(0)
-            bio.name = "media.jpg"
-            sent = await client.send_document("me", bio, caption=caption)
-    else:
-        bio.name = "media.mp4"
-        sent = await client.send_document("me", bio, caption=caption)
-    return sent.id
-
-
+# ── 메인 브로드캐스트 함수 ────────────────────────────────────────────────────
 async def broadcast_via_userbot(
     *,
     bot_token: str = "",
@@ -156,6 +88,25 @@ async def broadcast_via_userbot(
     caption: str = "",
     notify_callback=None,
 ) -> dict:
+    """
+    is_sent=FALSE 유저 전원에게 미디어 DM 발송.
+
+    Saved Messages 업로드 없이 BytesIO를 유저에게 직접 발송.
+    계정당 첫 발송에서 file_id를 캐시해 이후 재업로드를 방지.
+    """
+    from pyrogram import Client
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from pyrogram.errors import (
+        FloodWait,
+        UserIsBlocked,
+        InputUserDeactivated,
+        PeerIdInvalid,
+        UsernameNotOccupied,
+        UsernameInvalid,
+        UserPrivacyRestricted,
+        UserNotParticipant,
+        RPCError,
+    )
     from app.pg_broadcast import (
         generate_unique_ref,
         get_unsent_users,
@@ -163,75 +114,86 @@ async def broadcast_via_userbot(
         count_unsent_with_username,
     )
 
-    async def _notify(msg: str):
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("VIP CASINO", url=VIP_URL)]]
+    )
+
+    async def _notify(msg: str) -> None:
         if notify_callback:
             try:
                 await notify_callback(msg)
             except Exception:
                 pass
 
-    # ── 1. 파일 다운로드 ──────────────────────
+    # ── 1. 파일 다운로드 ──────────────────────────────────────────────────────
     if not file_id or not bot_token:
         await _notify("❌ file_id 또는 bot_token이 없습니다.")
         return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
 
     await _notify("⬇️ Bot API에서 파일 다운로드 중...")
     try:
-        file_bytes = await _download_via_bot_api(bot_token, file_id)
-        logger.info("파일 다운로드 완료 (%d bytes)", len(file_bytes))
+        file_bytes, remote_path = await _download_via_bot_api(bot_token, file_id)
+        logger.info("파일 다운로드 완료 (%d bytes, path=%s)", len(file_bytes), remote_path)
     except Exception as e:
-        await _notify(f"❌ 파일 다운로드 실패: {e}")
+        await _notify(
+            f"❌ 파일 다운로드 실패\n"
+            f"에러타입: {type(e).__name__}\n"
+            f"에러내용: {e}"
+        )
         return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
 
-    # ── 2. 세션 로드 ──────────────────────────
+    # ── 2. 세션 로드 ──────────────────────────────────────────────────────────
     sessions = _load_sessions()
     if not sessions:
         await _notify("❌ SESSION_STRING 환경변수가 없습니다.")
         return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
 
-    # ── 3. 발송 대상 확인 ─────────────────────
+    # ── 3. 발송 대상 확인 ─────────────────────────────────────────────────────
     total_unsent = count_unsent_with_username()
     if total_unsent == 0:
-        await _notify("ℹ️ 발송 가능한 유저가 없습니다.")
+        await _notify("ℹ️ 발송 가능한 유저(username 보유)가 없습니다.")
         return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
 
-    await _notify(
-        f"🚀 UserBot 발송 시작!\n"
-        f"대상: {total_unsent}명 | 계정 수: {len(sessions)} | DM 간격 {USER_DELAY_MIN}~{USER_DELAY_MAX}초"
-    )
-
-    # ── 4. Pyrogram 클라이언트 초기화 · 시작 · 연결 검증 ──
-    # all_started: start()까지 성공한 클라이언트 전원 (cleanup용)
-    # accounts:    start() + get_me() 모두 통과한 정상 계정만
+    # ── 4. 클라이언트 시작 + get_me() 즉시 검증 ──────────────────────────────
+    # all_started : start()까지 성공 (cleanup용)
+    # accounts    : get_me()까지 통과한 정상 계정만
     all_started: list[dict] = []
-    accounts: list[dict]    = []
+    accounts:    list[dict] = []
 
     for label, session_string in sessions:
-        client = None
+        client_obj = None
         try:
-            client = Client(
+            client_obj = Client(
                 name=label,
                 api_id=API_ID,
                 api_hash=API_HASH,
                 session_string=session_string,
                 in_memory=True,
             )
-            await client.start()
-            all_started.append({"label": label, "client": client,
-                                 "cooldown_until": 0.0, "msg_id": None})
+            await client_obj.start()
+            acc_entry = {
+                "label":          label,
+                "client":         client_obj,
+                "cooldown_until": 0.0,
+                "cached_file_id": None,   # 첫 발송 성공 후 Telegram file_id 캐시
+            }
+            all_started.append(acc_entry)
 
-            # 실제 API 호출로 세션 유효성 즉시 검증
-            me = await client.get_me()
-            logger.info("계정 연결 성공: %s (id=%s @%s)", label, me.id, me.username)
-            accounts.append(all_started[-1])
+            me = await client_obj.get_me()
+            logger.info("세션 연결 성공: %s (id=%s @%s)", label, me.id, me.username)
+            accounts.append(acc_entry)
 
-        except Exception:
-            logger.exception("계정 시작/검증 실패: %s", label)
-            await _notify(f"⚠️ {label} 세션 만료 또는 연결 실패 — 건너뜀")
-            # start()에 성공했다면 즉시 정리
-            if client is not None and all_started and all_started[-1]["label"] == label:
+        except Exception as e:
+            logger.exception("세션 시작/검증 실패: %s", label)
+            await _notify(
+                f"⚠️ {label} 세션 만료 또는 연결 실패 — 건너뜀\n"
+                f"에러타입: {type(e).__name__}\n"
+                f"에러내용: {e}"
+            )
+            # start()에 성공했으나 get_me()에서 실패한 경우 즉시 정리
+            if client_obj is not None and all_started and all_started[-1]["label"] == label:
                 try:
-                    await client.stop()
+                    await client_obj.stop()
                 except Exception:
                     pass
                 all_started.pop()
@@ -242,47 +204,85 @@ async def broadcast_via_userbot(
 
     await _notify(
         f"✅ 정상 계정 {len(accounts)}/{len(sessions)}개 준비됨 "
-        f"({', '.join(a['label'] for a in accounts)})"
+        f"({', '.join(a['label'] for a in accounts)})\n"
+        f"대상: {total_unsent}명 | DM 간격 {USER_DELAY_MIN:.0f}~{USER_DELAY_MAX:.0f}초"
     )
 
-    # ── 5. 각 세션의 Saved Messages에 업로드 ──
-    await _notify("📤 각 계정 Saved Messages에 미디어 업로드 중...")
-    valid_accounts: list[dict] = []
-    for acc in accounts:
-        try:
-            msg_id = await _upload_to_saved_messages(
-                acc["client"], file_bytes, file_type, caption,
-                label=acc["label"],
-                notify=_notify,
+    # ── 헬퍼: BytesIO 생성 ───────────────────────────────────────────────────
+    def _make_bio() -> io.BytesIO:
+        bio = io.BytesIO(file_bytes)
+        bio.seek(0)
+        if file_type == "video":
+            bio.name = "media.mp4"
+        elif file_type == "photo":
+            bio.name = "media.jpg"
+        else:
+            ext = remote_path.rsplit(".", 1)[-1] if "." in remote_path else "bin"
+            bio.name = f"media.{ext}"
+        return bio
+
+    # ── 헬퍼: 미디어 직접 발송 ──────────────────────────────────────────────
+    async def _send_to_user(
+        acc: dict,
+        target: str,
+        user_caption: str,
+    ) -> None:
+        """
+        미디어를 유저에게 직접 발송.
+        - cached_file_id 없음 → BytesIO 업로드 후 file_id 캐시
+        - cached_file_id 있음 → 캐시된 file_id 재사용 (재업로드 없음)
+        """
+        client: Client = acc["client"]
+        cached = acc["cached_file_id"]
+        src    = cached if cached else _make_bio()
+
+        if file_type == "video":
+            msg = await client.send_video(
+                target, src,
+                caption=user_caption,
+                duration=0,
+                width=0,
+                height=0,
+                supports_streaming=True,
+                reply_markup=keyboard,
             )
-            acc["msg_id"] = msg_id
-            valid_accounts.append(acc)
-            logger.info("%s 업로드 완료 (msg_id=%d)", acc["label"], msg_id)
-        except Exception as e:
-            logger.exception("%s 업로드 실패", acc["label"])
-            await _notify(
-                f"❌ 업로드 실패 상세\n"
-                f"계정: {acc['label']}\n"
-                f"에러타입: {type(e).__name__}\n"
-                f"에러내용: {e}"
+            if not cached and msg.video:
+                acc["cached_file_id"] = msg.video.file_id
+
+        elif file_type == "photo":
+            msg = await client.send_photo(
+                target, src,
+                caption=user_caption,
+                reply_markup=keyboard,
             )
+            if not cached and msg.photo:
+                acc["cached_file_id"] = msg.photo.file_id
 
-    if not valid_accounts:
-        await _notify("❌ 미디어 업로드에 성공한 계정이 없습니다.")
-        for acc in all_started:
-            try:
-                await acc["client"].stop()
-            except Exception:
-                pass
-        return {"total": 0, "sent": 0, "skipped": 0, "failed": 0}
+        else:
+            msg = await client.send_document(
+                target, src,
+                caption=user_caption,
+                reply_markup=keyboard,
+            )
+            if not cached and msg.document:
+                acc["cached_file_id"] = msg.document.file_id
 
-    accounts = valid_accounts
-
-    # ── 6. 발송 루프 ──────────────────────────
+    # ── 5. 발송 루프 ──────────────────────────────────────────────────────────
     sent    = 0
     skipped = 0
     failed  = 0
     acc_idx = 0
+
+    # 건너뛰어야 할 예외 집합 (재시도 불필요)
+    SKIP_ERRORS = (
+        UserIsBlocked,
+        InputUserDeactivated,
+        PeerIdInvalid,
+        UsernameNotOccupied,
+        UsernameInvalid,
+        UserPrivacyRestricted,
+        UserNotParticipant,
+    )
 
     try:
         while True:
@@ -290,177 +290,146 @@ async def broadcast_via_userbot(
             if not users:
                 break
 
-            batch_done = []
+            batch_done: list[int] = []
 
             for uid, username in users:
-                if not username:
+                username_clean = (username or "").lstrip("@").strip()
+                if not username_clean:
                     skipped += 1
                     batch_done.append(uid)
                     continue
 
-                username_clean = username.lstrip("@")
                 target = f"@{username_clean}"
 
                 # 추적 링크 생성
-                ref = generate_unique_ref(uid)
                 try:
+                    ref = generate_unique_ref(uid)
                     from app.pg_broadcast import _get_conn
                     conn = _get_conn()
                     cur  = conn.cursor()
                     cur.execute(
-                        "UPDATE broadcast_targets SET unique_ref=%s WHERE telegram_user_id=%s",
+                        "UPDATE broadcast_targets SET unique_ref=%s "
+                        "WHERE telegram_user_id=%s",
                         (ref, uid),
                     )
                     conn.commit()
                     cur.close()
                     conn.close()
                 except Exception:
-                    pass
+                    ref = None
 
-                if TRACKING_SERVER_URL:
+                if ref and TRACKING_SERVER_URL:
                     link = f"{TRACKING_SERVER_URL}/track/{ref}"
+                    user_caption = (
+                        caption.replace(AFFILIATE_URL, link)
+                        if AFFILIATE_URL and AFFILIATE_URL in caption
+                        else caption
+                    )
                 else:
-                    link = AFFILIATE_URL
+                    user_caption = caption
 
-                user_caption = (
-                    caption.replace(AFFILIATE_URL, link)
-                    if AFFILIATE_URL and AFFILIATE_URL in caption
-                    else caption
-                )
-
-                # 발송 시도 (최대 계정 수만큼)
+                # ── 계정 순환 발송 ───────────────────────────────────────────
                 delivered = False
                 attempts  = 0
 
                 while not delivered and attempts < len(accounts):
-                    acc = accounts[acc_idx % len(accounts)]
+                    acc     = accounts[acc_idx % len(accounts)]
                     acc_idx += 1
                     attempts += 1
 
-                    now = time.time()
+                    now      = time.time()
                     cooldown = acc.get("cooldown_until") or 0.0
-
                     if cooldown > now:
-                        wait_sec = cooldown - now
-                        logger.info("%s 쿨다운 중 (%.0f초 남음)", acc["label"], wait_sec)
-                        continue
-
-                    client  = acc["client"]
-                    msg_id  = acc["msg_id"]
-
-                    # peer resolve
-                    try:
-                        user_obj = await client.get_users(target)
-                    except FloodWait as e:
-                        wait = int(e.value or 30) + 5
-                        acc["cooldown_until"] = float(time.time() + wait)
-                        logger.warning("%s FloodWait(get_users) %s초", acc["label"], wait)
-                        continue
-                    except (PeerIdInvalid, UsernameNotOccupied, UsernameInvalid,
-                            UserPrivacyRestricted, InputUserDeactivated, UserIsBlocked,
-                            UserNotParticipant) as e:
-                        logger.warning("Skipping %s (get_users): %s", target, e)
-                        skipped += 1
-                        delivered = True
-                        batch_done.append(uid)
-                        break
-                    except Exception as e:
-                        logger.error("get_users 오류 %s: %s", target, e)
-                        failed += 1
-                        delivered = True
-                        batch_done.append(uid)
-                        break
-
-                    # 메시지 발송
-                    try:
-                        await client.copy_message(
-                            chat_id=user_obj.id,
-                            from_chat_id="me",
-                            message_id=msg_id,
-                            caption=user_caption,
+                        logger.info(
+                            "%s 쿨다운 중 (%.0f초 남음)", acc["label"], cooldown - now
                         )
+                        continue
+
+                    try:
+                        await _send_to_user(acc, target, user_caption)
                         sent += 1
                         delivered = True
                         batch_done.append(uid)
                         logger.info("발송 성공: %s", target)
+
                     except FloodWait as e:
                         wait = int(e.value or 30) + 5
-                        acc["cooldown_until"] = float(time.time() + wait)
-                        logger.warning("%s FloodWait(copy_message) %s초", acc["label"], wait)
-                        continue
-                    except (PeerIdInvalid, UsernameNotOccupied, UsernameInvalid,
-                            UserPrivacyRestricted, InputUserDeactivated, UserIsBlocked,
-                            UserNotParticipant) as e:
-                        logger.warning("Skipping %s (copy_message): %s", target, e)
+                        acc["cooldown_until"] = time.time() + wait
+                        logger.warning("%s FloodWait %d초", acc["label"], wait)
+                        await _notify(
+                            f"⚠️ {acc['label']} FloodWait {wait}초 대기 중..."
+                        )
+                        # 쿨다운 → 다음 계정으로 계속 시도
+
+                    except SKIP_ERRORS as e:
+                        logger.info("skip %s: %s", target, type(e).__name__)
                         skipped += 1
                         delivered = True
                         batch_done.append(uid)
-                        break
-                    except RPCError as e:
-                        logger.error("RPCError %s: %s", target, e)
+
+                    except (RPCError, Exception) as e:
+                        logger.exception("발송 실패 %s", target)
+                        await _notify(
+                            f"❌ 업로드 실패 상세\n"
+                            f"계정: {acc['label']}\n"
+                            f"대상: {target}\n"
+                            f"에러타입: {type(e).__name__}\n"
+                            f"에러내용: {e}"
+                        )
                         failed += 1
                         delivered = True
                         batch_done.append(uid)
-                        break
-                    except Exception as e:
-                        logger.error("발송 오류 %s: %s", target, e)
-                        failed += 1
-                        delivered = True
-                        batch_done.append(uid)
-                        break
 
                 if not delivered:
-                    # 전 계정 쿨다운 → 가장 빠른 쿨다운까지 대기
+                    # 전 계정 쿨다운 → 가장 빠른 해제까지 대기 후 failed 처리
                     next_ready = min(
                         float(a.get("cooldown_until") or 0.0) for a in accounts
                     )
                     wait_sec = max(0.0, next_ready - time.time())
                     if wait_sec > 0:
-                        logger.info("전 계정 쿨다운 중 - %.0f초 대기", wait_sec)
+                        logger.info("전 계정 쿨다운 — %.0f초 대기", wait_sec)
                         await asyncio.sleep(wait_sec)
                     failed += 1
                     batch_done.append(uid)
 
-                # 딜레이
-                delay = USER_DELAY_MIN + (USER_DELAY_MAX - USER_DELAY_MIN) * (
-                    (sent + skipped + failed) % 10
-                ) / 10
-                await asyncio.sleep(delay)
+                # 유저 간 랜덤 딜레이
+                await asyncio.sleep(random.uniform(USER_DELAY_MIN, USER_DELAY_MAX))
 
-                # 긴 휴식
+                # 긴 휴식 (스팸 방지)
                 total_done = sent + skipped + failed
                 if total_done > 0 and total_done % LONG_BREAK_EVERY == 0:
-                    break_time = LONG_BREAK_MIN + (LONG_BREAK_MAX - LONG_BREAK_MIN) // 2
-                    logger.info("긴 휴식 %d초", break_time)
-                    await _notify(f"⏸ 스팸 방지 휴식 중... ({break_time}초)")
-                    await asyncio.sleep(break_time)
+                    break_sec = random.uniform(LONG_BREAK_MIN, LONG_BREAK_MAX)
+                    logger.info("스팸 방지 휴식 %.1f분", break_sec / 60)
+                    await _notify(
+                        f"⏸ 스팸 방지 휴식 {break_sec / 60:.0f}분 "
+                        f"(누적 {total_done}명 처리)"
+                    )
+                    await asyncio.sleep(break_sec)
 
-            # 배치 DB 업데이트
+            # 배치 완료 → DB 업데이트
             if batch_done:
                 mark_sent(batch_done)
+                remaining = count_unsent_with_username()
                 await _notify(
-                    f"📦 배치 완료 | 성공: {sent} / 건너뜀: {skipped} / 실패: {failed} | "
-                    f"남은: {total_unsent - sent - skipped - failed}명"
+                    f"📦 배치 완료\n"
+                    f"• 성공: {sent}명 / 건너뜀: {skipped}명 / 실패: {failed}명\n"
+                    f"• 남은 발송 가능 대상: {remaining}명"
                 )
+                if remaining == 0:
+                    break
 
     finally:
-        # Saved Messages 정리 및 클라이언트 종료
-        # valid_accounts(업로드 성공)만 msg_id 삭제, all_started 전원 stop
-        for acc in accounts:      # accounts == valid_accounts
-            try:
-                if acc.get("msg_id"):
-                    await acc["client"].delete_messages("me", acc["msg_id"])
-            except Exception:
-                pass
-        for acc in all_started:   # 시작했던 모든 클라이언트 종료 (실패 포함)
+        # 시작된 모든 클라이언트 종료 (성공/실패 무관)
+        for acc in all_started:
             try:
                 await acc["client"].stop()
             except Exception:
                 pass
 
-    result = {"total": total_unsent, "sent": sent, "skipped": skipped, "failed": failed}
     await _notify(
         f"✅ UserBot 발송 완료\n"
-        f"성공: {sent}명 | 건너뜀: {skipped}명 | 실패: {failed}명"
+        f"• 성공: {sent}명\n"
+        f"• 건너뜀(차단·탈퇴·없음): {skipped}명\n"
+        f"• 실패: {failed}명"
     )
-    return result
+    return {"total": total_unsent, "sent": sent, "skipped": skipped, "failed": failed}
