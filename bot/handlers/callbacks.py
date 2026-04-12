@@ -105,6 +105,10 @@ CALLBACK_MENU_STATUS = "menu_status"
 CALLBACK_MENU_HOME = "menu_home"
 CALLBACK_CONFIRM_SEND = "confirm_send"
 CALLBACK_CONFIRM_CANCEL = "confirm_cancel"
+# 수동 실행 버튼
+CALLBACK_RUN_GROUP_FINDER   = "run_group_finder"
+CALLBACK_RUN_MEMBER_SCRAPER = "run_member_scraper"
+CALLBACK_RUN_DM_CAMPAIGN    = "run_dm_campaign"
 
 
 def _admin_main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -112,6 +116,10 @@ def _admin_main_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎬 미디어 장전", callback_data=CALLBACK_MENU_LOAD)],
         [InlineKeyboardButton("📤 DM 발송 실행", callback_data=CALLBACK_MENU_SEND)],
         [InlineKeyboardButton("📊 DB 현황", callback_data=CALLBACK_MENU_STATUS)],
+        [InlineKeyboardButton("─── 수동 실행 ───", callback_data=CALLBACK_MENU_HOME)],
+        [InlineKeyboardButton("🔍 그룹 발굴 실행", callback_data=CALLBACK_RUN_GROUP_FINDER)],
+        [InlineKeyboardButton("👥 멤버 수집 실행", callback_data=CALLBACK_RUN_MEMBER_SCRAPER)],
+        [InlineKeyboardButton("🚀 DM 캠페인 실행", callback_data=CALLBACK_RUN_DM_CAMPAIGN)],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -140,6 +148,49 @@ async def _run_script_background(script_name: str) -> None:
         )
     except Exception as e:
         logger.warning("Failed to start script %s: %s", script_name, e)
+
+
+async def _run_script_watched(
+    script_name: str, label: str, bot, admin_chat_id: int
+) -> None:
+    """
+    스크립트를 실행하고 완료를 기다림.
+    - 성공: 스크립트가 자체적으로 완료 알림 전송 (이중 알림 방지)
+    - 실패(exit != 0): 에러 내용을 관리자에게 DM 전송
+    """
+    script_path = ROOT_DIR / "scripts" / script_name
+    if not script_path.is_file():
+        await bot.send_message(admin_chat_id, f"❌ {label}\n스크립트 없음: {script_name}")
+        return
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script_path),
+            cwd=str(ROOT_DIR),
+            env={**os.environ, "PYTHONPATH": str(ROOT_DIR)},
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            err_text = (stdout or b"").decode(errors="replace")[-1500:]
+            try:
+                await bot.send_message(
+                    admin_chat_id,
+                    f"❌ {label} 실패 (exit {proc.returncode})\n\n{err_text}",
+                )
+            except Exception:
+                pass
+        # 정상 종료 시 스크립트 내부에서 완료 알림을 직접 전송
+    except Exception as e:
+        logger.exception("_run_script_watched error for %s", script_name)
+        try:
+            await bot.send_message(
+                admin_chat_id,
+                f"❌ {label} 실행 중 예외\n{type(e).__name__}: {e}",
+            )
+        except Exception:
+            pass
 
 
 async def _broadcast_loaded_message(bot, admin_chat_id: int) -> str:
@@ -413,4 +464,52 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await query.message.reply_text("권한이 없습니다.")
             return
         await query.message.reply_text("작업을 취소했습니다.", reply_markup=_home_keyboard())
+        return
+
+    if data == CALLBACK_RUN_GROUP_FINDER:
+        if not admin:
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text(
+            "🔍 그룹 발굴 실행 시작됨\n완료 시 결과 알림 드립니다.",
+            reply_markup=_home_keyboard(),
+        )
+        asyncio.create_task(
+            _run_script_watched(
+                "group_finder.py", "그룹 발굴",
+                context.bot, query.from_user.id,
+            )
+        )
+        return
+
+    if data == CALLBACK_RUN_MEMBER_SCRAPER:
+        if not admin:
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text(
+            "👥 멤버 수집 실행 시작됨\n완료 시 결과 알림 드립니다.",
+            reply_markup=_home_keyboard(),
+        )
+        asyncio.create_task(
+            _run_script_watched(
+                "member_scraper.py", "멤버 수집",
+                context.bot, query.from_user.id,
+            )
+        )
+        return
+
+    if data == CALLBACK_RUN_DM_CAMPAIGN:
+        if not admin:
+            await query.message.reply_text("권한이 없습니다.")
+            return
+        await query.message.reply_text(
+            "🚀 DM 캠페인 실행 시작됨\n완료 시 결과 알림 드립니다.",
+            reply_markup=_home_keyboard(),
+        )
+        asyncio.create_task(
+            _run_script_watched(
+                "dm_campaign_runner.py", "DM 캠페인",
+                context.bot, query.from_user.id,
+            )
+        )
         return
