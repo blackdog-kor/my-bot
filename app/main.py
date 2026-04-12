@@ -296,9 +296,8 @@ async def debug_status():
 
     # 5. DB 연결 확인
     try:
-        from app.pg_broadcast import get_db_connection
-        conn = get_db_connection()
-        conn.close()
+        from app.pg_broadcast import count_total
+        count_total()
         db_status = "연결됨"
     except Exception as e:
         db_status = f"오류: {e}"

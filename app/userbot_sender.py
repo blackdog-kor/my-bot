@@ -224,12 +224,21 @@ async def broadcast_via_userbot(
     # ── 헬퍼: 미디어 직접 발송 ──────────────────────────────────────────────
     async def _send_to_user(
         acc: dict,
-        chat_id: int,          # 반드시 user.id 정수 — username 문자열 사용 금지
+        chat_id: str,          # "@username" 문자열 — get_users() 캐시된 peer를 username key로 조회
         user_caption: str,
     ) -> None:
         """
         미디어를 유저에게 직접 발송.
-        chat_id는 get_users()로 해석한 user.id 정수여야 한다.
+
+        chat_id는 반드시 "@username" 문자열이어야 한다.
+        호출 전에 같은 client로 get_users(chat_id)를 호출해
+        peer cache를 채운 상태여야 PEER_ID_INVALID를 피할 수 있다.
+
+        ❌ user_obj.id 정수 사용 금지:
+           in_memory 세션에서 정수→InputPeer 매핑이 누락돼 PEER_ID_INVALID 발생.
+        ✅ "@username" 문자열 사용:
+           Pyrogram이 get_users()로 캐시된 peer를 username key로 직접 조회.
+
         - cached_file_id 없음 → BytesIO 업로드 후 file_id 캐시
         - cached_file_id 있음 → 캐시된 file_id 재사용 (재업로드 없음)
         """
@@ -382,9 +391,9 @@ async def broadcast_via_userbot(
                         batch_done.append(uid)
                         break
 
-                    # ── Step B: user.id 정수로 직접 발송 ────────────────────
+                    # ── Step B: @username 문자열로 발송 (peer cache 활용) ────
                     try:
-                        await _send_to_user(acc, user_id, user_caption)
+                        await _send_to_user(acc, target, user_caption)
                         sent += 1
                         delivered = True
                         batch_done.append(uid)

@@ -166,6 +166,82 @@ def discover_groups() -> list[str]:
     return handles
 
 
+async def join_groups_for_broadcast_accounts(groups: list[str]) -> None:
+    """
+    브로드캐스트 계정(SESSION_STRING_1..10)이 수집 그룹에 join하도록 강제.
+    그룹 멤버 peer access_hash를 브로드캐스트 계정 세션에 캐싱하기 위함.
+    이를 통해 나중에 해당 그룹 멤버에게 DM 발송 시 PEER_ID_INVALID를 방지.
+    """
+    sessions: list[tuple[str, str]] = []
+    for i in range(1, 11):
+        key = f"SESSION_STRING_{i}"
+        val = (os.getenv(key) or "").strip()
+        if val:
+            sessions.append((key, val))
+
+    if not sessions:
+        print("⚠️  [join] 브로드캐스트 SESSION_STRING_1..10 없음 — skip")
+        return
+
+    print(f"\n🔗 [join] 브로드캐스트 계정 {len(sessions)}개가 그룹 {len(groups)}개에 join 시도 중...")
+    _telegram_notify(
+        f"🔗 브로드캐스트 계정 그룹 join 시작\n"
+        f"• 계정 수: {len(sessions)}개\n"
+        f"• 그룹 수: {len(groups)}개"
+    )
+
+    for label, session_str in sessions:
+        joined = failed = already = 0
+        try:
+            async with Client(
+                name=f"join_{label}",
+                api_id=API_ID,
+                api_hash=API_HASH,
+                session_string=session_str,
+                in_memory=True,
+            ) as client:
+                me = await client.get_me()
+                print(f"  ✅ [{label}] 연결 성공: @{me.username or me.id}")
+
+                for handle in groups:
+                    try:
+                        await client.join_chat(handle)
+                        joined += 1
+                        print(f"    ➕ [{label}] join: {handle}")
+                        await asyncio.sleep(2.0)
+                    except Exception as e:
+                        err_name = type(e).__name__
+                        if "already" in str(e).lower() or err_name in ("UserAlreadyParticipant",):
+                            already += 1
+                            print(f"    ℹ️  [{label}] 이미 참여: {handle}")
+                        elif err_name == "FloodWait":
+                            wait = getattr(e, "value", 30) + 5
+                            print(f"    ⏳ [{label}] FloodWait {wait}초 대기...")
+                            await asyncio.sleep(wait)
+                            try:
+                                await client.join_chat(handle)
+                                joined += 1
+                            except Exception as e2:
+                                failed += 1
+                                print(f"    ❌ [{label}] 재시도 실패 {handle}: {e2}")
+                        else:
+                            failed += 1
+                            print(f"    ❌ [{label}] join 실패 {handle}: {err_name} — {e}")
+
+        except Exception as e:
+            print(f"  ❌ [{label}] 세션 연결 실패: {type(e).__name__} — {e}")
+            _telegram_notify(f"❌ [{label}] 세션 연결 실패\n{type(e).__name__}: {e}")
+            continue
+
+        print(f"  📊 [{label}] join 완료: 신규 {joined}개 / 이미참여 {already}개 / 실패 {failed}개")
+        _telegram_notify(
+            f"✅ [{label}] 그룹 join 완료\n"
+            f"• 신규: {joined}개 / 이미참여: {already}개 / 실패: {failed}개"
+        )
+
+    print("🔗 [join] 전체 완료\n")
+
+
 async def scrape_group(app: Client, handle: str) -> tuple[int, int]:
     """단일 그룹 멤버 수집. app.pg_broadcast.save_broadcast_batch 사용."""
     from app.pg_broadcast import save_broadcast_batch
@@ -188,7 +264,8 @@ async def scrape_group(app: Client, handle: str) -> tuple[int, int]:
             batch.append((user.id, username, handle))
             count += 1
             if len(batch) >= BATCH_SIZE:
-                saved += save_broadcast_batch(batch)
+                save_broadcast_batch(batch)
+                saved += len(batch)
                 batch.clear()
                 print(f"    💾 중간 저장 완료 (누적 {count}명 처리)")
             if PER_USER_DELAY_SEC > 0:
@@ -197,7 +274,8 @@ async def scrape_group(app: Client, handle: str) -> tuple[int, int]:
                 print(f"    ⚠️ 최대 수집 한도 {MAX_MEMBERS_PER_GROUP}명 도달")
                 break
         if batch:
-            saved += save_broadcast_batch(batch)
+            save_broadcast_batch(batch)
+            saved += len(batch)
     except (ChatAdminRequired, ChannelPrivate):
         print(f"    ⚠️ [{handle}] 멤버 조회 권한 없음")
     except (UsernameNotOccupied, UsernameInvalid):
@@ -239,6 +317,12 @@ async def main() -> None:
     if not all_groups:
         print("\n⚠️ 수집 가능한 그룹이 없습니다.")
         sys.exit(0)
+
+    # JOIN_BROADCAST_ACCOUNTS=1 이면 브로드캐스트 계정들도 그룹에 join
+    if os.getenv("JOIN_BROADCAST_ACCOUNTS", "0").strip() == "1":
+        await join_groups_for_broadcast_accounts(all_groups)
+    else:
+        print("ℹ️  JOIN_BROADCAST_ACCOUNTS=1 이 아니므로 브로드캐스트 계정 join 생략")
 
     print(f"\n📋 총 {len(all_groups)}개 그룹에서 멤버 수집 시작합니다.")
     _telegram_notify(
