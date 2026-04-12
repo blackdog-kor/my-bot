@@ -434,6 +434,23 @@ def mark_group_scrape_failed(group_id: int):
         logger.warning("mark_group_scrape_failed failed: %s", e)
 
 
+def truncate_discovered_groups() -> int:
+    """discovered_groups 테이블 전체 삭제. 삭제된 행 수 반환."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM discovered_groups")
+        deleted = cur.rowcount or 0
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("truncate_discovered_groups: %d rows deleted", deleted)
+        return deleted
+    except Exception as e:
+        logger.warning("truncate_discovered_groups failed: %s", e)
+        return 0
+
+
 def count_discovered_groups() -> dict:
     try:
         conn = _get_conn()

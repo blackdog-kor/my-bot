@@ -34,11 +34,12 @@ ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 MAX_GROUPS_PER_RUN      = int(os.getenv("MAX_GROUPS_PER_RUN",      "20"))
 MAX_RESULTS_PER_KEYWORD = int(os.getenv("MAX_RESULTS_PER_KEYWORD", "50"))
 KEYWORD_DELAY_SEC       = float(os.getenv("KEYWORD_DELAY_SEC",     "5.0"))
+MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
-    "카지노", "온라인카지노", "슬롯", "바카라", "스포츠배팅",
-    "casino", "1win", "bet", "gambling", "crypto casino",
+    "카지노", "바카라", "슬롯", "온라인카지노",
+    "스포츠배팅", "토토", "해외배팅",
 ]
 _kw_env = os.getenv("SEARCH_KEYWORDS", "").strip()
 SEARCH_KEYWORDS: list[str] = (
@@ -79,6 +80,7 @@ async def search_groups_by_keyword(
     keyword: str,
     seen_ids: set[int],
     max_per_keyword: int,
+    min_members: int = 1000,
 ) -> list[dict]:
     """
     keyword로 search_global 호출 → 그룹/슈퍼그룹/채널 추출.
@@ -100,12 +102,15 @@ async def search_groups_by_keyword(
                 continue
             if chat.id in seen_ids:
                 continue
+            member_count = getattr(chat, "members_count", 0) or 0
+            if member_count < min_members:
+                continue
             seen_ids.add(chat.id)
             results.append({
                 "id":           chat.id,
                 "username":     chat.username,
                 "title":        chat.title or "",
-                "member_count": getattr(chat, "members_count", 0) or 0,
+                "member_count": member_count,
             })
             count += 1
             if count >= max_per_keyword:
@@ -125,6 +130,7 @@ async def main() -> None:
     from pyrogram import Client
     from app.pg_broadcast import (
         ensure_discovered_groups_table,
+        truncate_discovered_groups,
         save_discovered_group,
         count_discovered_groups,
     )
@@ -142,14 +148,18 @@ async def main() -> None:
     label, session_string = session_info
     print(f"✅ 세션 사용: {label}")
     print(f"🔑 검색 키워드 {len(SEARCH_KEYWORDS)}개: {', '.join(SEARCH_KEYWORDS)}")
+    print(f"👥 멤버 수 필터: {MIN_MEMBER_COUNT:,}명 이상")
 
     ensure_discovered_groups_table()
-    print("✅ discovered_groups 테이블 준비 완료\n")
+    deleted = truncate_discovered_groups()
+    print(f"🗑️  기존 데이터 {deleted}개 삭제 (discovered_groups 초기화)\n")
 
     _notify(
         f"🔍 그룹 발굴 시작\n"
         f"• 키워드: {len(SEARCH_KEYWORDS)}개\n"
-        f"• 최대 발굴: {MAX_GROUPS_PER_RUN}개"
+        f"• 최대 발굴: {MAX_GROUPS_PER_RUN}개\n"
+        f"• 멤버 최소: {MIN_MEMBER_COUNT:,}명\n"
+        f"• 기존 데이터 {deleted}개 삭제"
     )
 
     total_new = 0
@@ -175,7 +185,7 @@ async def main() -> None:
             per_kw = min(MAX_RESULTS_PER_KEYWORD, remaining * 3)
 
             print(f"  [{i+1}/{len(SEARCH_KEYWORDS)}] 검색: '{keyword}'")
-            groups = await search_groups_by_keyword(client, keyword, seen_ids, per_kw)
+            groups = await search_groups_by_keyword(client, keyword, seen_ids, per_kw, MIN_MEMBER_COUNT)
 
             for g in groups:
                 if total_new >= MAX_GROUPS_PER_RUN:
@@ -186,8 +196,7 @@ async def main() -> None:
                 if is_new:
                     total_new += 1
                     print(
-                        f"    ✅ 신규: @{g['username']} — {g['title']} "
-                        f"(멤버 {g['member_count']}명)"
+                        f"    ✅ @{g['username']} (멤버 {g['member_count']:,}명) 저장"
                     )
                 else:
                     total_dup += 1
