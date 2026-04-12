@@ -303,9 +303,16 @@ async def main() -> None:
         print("\n❌ SESSION_STRING 환경변수가 없습니다.")
         sys.exit(1)
 
-    from app.pg_broadcast import ensure_pg_table
+    from app.pg_broadcast import (
+        ensure_pg_table,
+        ensure_discovered_groups_table,
+        get_unscraped_groups,
+        mark_group_scraped,
+        mark_group_scrape_failed,
+    )
     ensure_pg_table()
-    print("✅ PostgreSQL broadcast_targets 준비 완료\n")
+    ensure_discovered_groups_table()
+    print("✅ PostgreSQL broadcast_targets / discovered_groups 준비 완료\n")
 
     auto_groups = discover_groups()
     all_groups: list[str] = list(auto_groups)
@@ -327,6 +334,22 @@ async def main() -> None:
             seen_lower.add(h.lower())
             all_groups.append(h)
             print(f"  ➕ TARGET_GROUPS 추가: {h}")
+
+    # discovered_groups 테이블에서 scraped=FALSE 그룹 추가
+    # handle → group_id 매핑 (scrape 완료/실패 후 DB 업데이트용)
+    discovered_group_map: dict[str, int] = {}
+    unscraped = get_unscraped_groups(limit=int(os.getenv("MAX_GROUPS_PER_RUN", "20")))
+    for group_id, username, title in unscraped:
+        if not username:
+            continue
+        h = f"@{username}" if not username.startswith("@") else username
+        if h.lower() not in seen_lower:
+            seen_lower.add(h.lower())
+            all_groups.append(h)
+            print(f"  ➕ discovered_groups 추가: {h} ({title})")
+        discovered_group_map[h.lower()] = group_id
+    if unscraped:
+        print(f"  📋 discovered_groups 에서 {len(unscraped)}개 로드\n")
 
     if not all_groups:
         print("\n⚠️ 수집 가능한 그룹이 없습니다.")
@@ -356,11 +379,14 @@ async def main() -> None:
         session_string=SESSION_STRING,
     ) as app:
         for i, handle in enumerate(all_groups):
+            gid = discovered_group_map.get(handle.lower())
             try:
                 s, sk = await scrape_group(app, handle)
                 total_saved += s
                 total_skipped += sk
                 ok_groups += 1
+                if gid:
+                    mark_group_scraped(gid)
                 _telegram_notify(
                     f"📤 그룹 완료 ({i+1}/{len(all_groups)})\n"
                     f"• {handle} → 신규 저장 {s}명 / 건너뜀 {sk}명\n"
@@ -369,6 +395,8 @@ async def main() -> None:
             except Exception as e:
                 print(f"  ❌ [{handle}] 처리 실패: {e}")
                 fail_groups += 1
+                if gid:
+                    mark_group_scrape_failed(gid)
                 _telegram_notify(f"❌ 그룹 실패 [{handle}]\n{type(e).__name__}: {e}")
             if i < len(all_groups) - 1:
                 await asyncio.sleep(PER_GROUP_DELAY_SEC)

@@ -81,6 +81,13 @@ def _run_script(script_name: str, job_label: str) -> bool:
         return False
 
 
+def _job_group_finder() -> None:
+    with _job_lock:
+        _notify("🔍 그룹 발굴 Job 시작 (group_finder)")
+        ok = _run_script("group_finder.py", "그룹발굴(group_finder)")
+        _notify("🔍 그룹 발굴 Job 완료" if ok else "🔍 그룹 발굴 Job 실패")
+
+
 def _job_member_scraper() -> None:
     with _job_lock:
         _notify("📥 수집 Job 시작 (member_scraper)")
@@ -95,17 +102,38 @@ def _job_dm_campaign() -> None:
         _notify("📤 발송 Job 완료" if ok else "📤 발송 Job 실패")
 
 
+def _job_retry_sender() -> None:
+    with _job_lock:
+        _notify("🔁 재발송 Job 시작 (retry_sender)")
+        ok = _run_script("retry_sender.py", "재발송(retry_sender)")
+        _notify("🔁 재발송 Job 완료" if ok else "🔁 재발송 Job 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
+    # 03:00 — 새 그룹 발굴 (group_finder)
+    scheduler.add_job(
+        _job_group_finder,
+        trigger=CronTrigger(hour=3, minute=0),
+        id="group_finder",
+    )
+    # 00:00 — 멤버 수집 (member_scraper, discovered_groups 포함)
     scheduler.add_job(
         _job_member_scraper,
         trigger=CronTrigger(hour=0, minute=0),
         id="member_scraper",
     )
+    # 06:00 — 1차 DM 발송 (dm_campaign_runner)
     scheduler.add_job(
         _job_dm_campaign,
         trigger=CronTrigger(hour=6, minute=0),
         id="dm_campaign_runner",
+    )
+    # 12:00 — 3일 경과 미클릭 재발송 (retry_sender)
+    scheduler.add_job(
+        _job_retry_sender,
+        trigger=CronTrigger(hour=12, minute=0),
+        id="retry_sender",
     )
     scheduler.start()
 
@@ -113,7 +141,10 @@ def run_scheduler_forever() -> None:
     jobs = list(scheduler.get_jobs())
     for j in jobs:
         logger.info("다음 예약: %s — %s", j.id, j.next_run_time)
-    print("--- 스케줄러 기동: 수집 00:00, 발송 06:00 ---", flush=True)
+    print(
+        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / 발송 06:00 / 재발송 12:00 ---",
+        flush=True,
+    )
 
     try:
         while True:

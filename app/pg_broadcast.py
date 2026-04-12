@@ -331,6 +331,128 @@ def get_count_added_on_date(target_date) -> int:
         return 0
 
 
+# ─────────────────────────────────────────────
+# discovered_groups 테이블
+# ─────────────────────────────────────────────
+
+def ensure_discovered_groups_table():
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS discovered_groups (
+                group_id      BIGINT PRIMARY KEY,
+                username      TEXT,
+                title         TEXT,
+                member_count  INTEGER,
+                discovered_at TIMESTAMPTZ DEFAULT NOW(),
+                scraped       BOOLEAN DEFAULT FALSE,
+                scrape_failed BOOLEAN DEFAULT FALSE
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("ensure_discovered_groups_table: OK")
+    except Exception as e:
+        logger.warning("ensure_discovered_groups_table failed: %s", e)
+
+
+def save_discovered_group(
+    group_id: int, username: str, title: str, member_count: int
+) -> bool:
+    """신규 그룹 저장. 이미 존재하면 False 반환."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO discovered_groups (group_id, username, title, member_count)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (group_id) DO NOTHING
+        """, (group_id, username, title, member_count))
+        inserted = cur.rowcount > 0
+        conn.commit()
+        cur.close()
+        conn.close()
+        return inserted
+    except Exception as e:
+        logger.warning("save_discovered_group failed: %s", e)
+        return False
+
+
+def get_unscraped_groups(limit: int = 50) -> list[tuple[int, str, str]]:
+    """scraped=FALSE, scrape_failed=FALSE 그룹 반환 (group_id, username, title)"""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT group_id, username, title
+            FROM discovered_groups
+            WHERE scraped = FALSE
+              AND scrape_failed = FALSE
+              AND username IS NOT NULL
+              AND username <> ''
+            ORDER BY discovered_at
+            LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning("get_unscraped_groups failed: %s", e)
+        return []
+
+
+def mark_group_scraped(group_id: int):
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE discovered_groups SET scraped=TRUE WHERE group_id=%s",
+            (group_id,),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.warning("mark_group_scraped failed: %s", e)
+
+
+def mark_group_scrape_failed(group_id: int):
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE discovered_groups SET scrape_failed=TRUE WHERE group_id=%s",
+            (group_id,),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.warning("mark_group_scrape_failed failed: %s", e)
+
+
+def count_discovered_groups() -> dict:
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE scraped = FALSE AND scrape_failed = FALSE) AS pending
+            FROM discovered_groups
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return {"total": row[0] or 0, "pending": row[1] or 0}
+    except Exception as e:
+        logger.warning("count_discovered_groups failed: %s", e)
+        return {"total": 0, "pending": 0}
+
+
 def get_count_clicked_on_date(target_date) -> int:
     try:
         conn = _get_conn()
