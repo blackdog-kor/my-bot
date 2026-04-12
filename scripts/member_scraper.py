@@ -42,6 +42,9 @@ SESSION_STRING = os.getenv("SESSION_STRING", "")
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID = (os.getenv("ADMIN_ID") or "").strip()
 
+# 수동으로 지정할 그룹 목록 (쉼표 구분, 예: "@group1,@group2")
+TARGET_GROUPS_ENV = os.getenv("TARGET_GROUPS", "").strip()
+
 SEARCH_QUERIES = [
     "카지노 텔레그램 그룹 site:t.me",
     "온라인카지노 텔레그램 그룹",
@@ -312,17 +315,29 @@ async def main() -> None:
         if h.lower() not in seen_lower:
             seen_lower.add(h.lower())
             all_groups.append(h)
-            print(f"  ➕ 수동 추가: {h}")
+            print(f"  ➕ 수동 추가 (EXTRA_GROUPS): {h}")
+
+    # TARGET_GROUPS 환경변수에서 그룹 추가
+    for raw in TARGET_GROUPS_ENV.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        h = raw if raw.startswith("@") else f"@{raw}"
+        if h.lower() not in seen_lower:
+            seen_lower.add(h.lower())
+            all_groups.append(h)
+            print(f"  ➕ TARGET_GROUPS 추가: {h}")
 
     if not all_groups:
         print("\n⚠️ 수집 가능한 그룹이 없습니다.")
         sys.exit(0)
 
-    # JOIN_BROADCAST_ACCOUNTS=1 이면 브로드캐스트 계정들도 그룹에 join
-    if os.getenv("JOIN_BROADCAST_ACCOUNTS", "0").strip() == "1":
+    # 브로드캐스트 계정들을 수집 그룹에 join — PEER_ID_INVALID 방지의 핵심
+    # JOIN_BROADCAST_ACCOUNTS=0 으로 명시해야만 생략 가능 (기본: 항상 실행)
+    if os.getenv("JOIN_BROADCAST_ACCOUNTS", "1").strip() != "0":
         await join_groups_for_broadcast_accounts(all_groups)
     else:
-        print("ℹ️  JOIN_BROADCAST_ACCOUNTS=1 이 아니므로 브로드캐스트 계정 join 생략")
+        print("ℹ️  JOIN_BROADCAST_ACCOUNTS=0 — 브로드캐스트 계정 join 생략")
 
     print(f"\n📋 총 {len(all_groups)}개 그룹에서 멤버 수집 시작합니다.")
     _telegram_notify(
