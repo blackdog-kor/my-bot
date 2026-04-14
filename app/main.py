@@ -69,6 +69,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("ensure_loaded_message_table: %s", e)
 
+    try:
+        from app.pg_broadcast import ensure_campaign_config_table
+        ensure_campaign_config_table()
+    except Exception as e:
+        logger.warning("ensure_campaign_config_table: %s", e)
+
     # Admin Bot 스레드 시작
     try:
         bot_thread = threading.Thread(target=_run_bot, daemon=True)

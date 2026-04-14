@@ -24,8 +24,9 @@ logging.basicConfig(
 logger = logging.getLogger("subscribe_push")
 
 SUBSCRIBE_BOT_TOKEN = (os.getenv("SUBSCRIBE_BOT_TOKEN") or "").strip()
-ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
-ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "").strip()
+ADMIN_ID_RAW        = (os.getenv("ADMIN_ID") or "").strip()
+ADMIN_ID            = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 
 
 async def _send_media(bot, chat_id: int, file_id: str, file_type: str, caption: str) -> None:
@@ -44,7 +45,8 @@ async def _send_media(bot, chat_id: int, file_id: str, file_type: str, caption: 
 async def main() -> None:
     from telegram import Bot
     from bot.handlers.callbacks import get_loaded_message_full
-    from app.pg_broadcast import get_subscribe_user_ids
+    from app.pg_broadcast import get_subscribe_users, get_campaign_config
+    from app.userbot_sender import personalize_caption
 
     if not SUBSCRIBE_BOT_TOKEN:
         logger.error("SUBSCRIBE_BOT_TOKEN이 설정되지 않았습니다.")
@@ -61,7 +63,7 @@ async def main() -> None:
             await bot.send_message(ADMIN_ID, msg)
         return
 
-    _, _, file_id, file_type, caption = loaded
+    _, _, file_id, file_type, loaded_caption = loaded
     if not file_id:
         msg = "⏰ [09:00 KST 자동 푸시] ❌ 파일 ID 없음. 재장전 필요."
         logger.warning(msg)
@@ -69,11 +71,27 @@ async def main() -> None:
             await bot.send_message(ADMIN_ID, msg)
         return
 
-    # 구독자 목록
-    user_ids = get_subscribe_user_ids()
-    logger.info("자동 푸시: 총 %d명에게 발송 시작", len(user_ids))
+    # campaign_config 로드 (DB 우선, 없으면 환경변수 폴백)
+    try:
+        cfg = get_campaign_config()
+    except Exception:
+        cfg = {}
 
-    if not user_ids:
+    effective_affiliate_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
+    _db_caption_tmpl        = (cfg.get("caption_template") or "").strip()
+    _db_promo_code          = (cfg.get("promo_code") or "").strip()
+
+    base_caption = _db_caption_tmpl or loaded_caption
+    if _db_promo_code and "{promo_code}" in base_caption:
+        base_caption = base_caption.replace("{promo_code}", _db_promo_code)
+    if effective_affiliate_url and effective_affiliate_url not in base_caption:
+        base_caption = f"{base_caption}\n{effective_affiliate_url}"
+
+    # 구독자 목록 (id + username)
+    users = get_subscribe_users()
+    logger.info("자동 푸시: 총 %d명에게 발송 시작", len(users))
+
+    if not users:
         msg = "⏰ [09:00 KST 자동 푸시] 구독자가 없습니다."
         logger.info(msg)
         if ADMIN_ID:
@@ -81,9 +99,10 @@ async def main() -> None:
         return
 
     sent = skipped = failed = 0
-    for uid in user_ids:
+    for uid, username in users:
         try:
-            await _send_media(bot, uid, file_id, file_type, caption)
+            user_caption = await personalize_caption(base_caption, username)
+            await _send_media(bot, uid, file_id, file_type, user_caption)
             sent += 1
         except Exception as e:
             err = str(e).lower()

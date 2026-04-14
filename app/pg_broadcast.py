@@ -642,3 +642,87 @@ def get_loaded_message():
     except Exception as e:
         logger.warning("get_loaded_message failed: %s", e)
         return None
+
+
+# ─────────────────────────────────────────────
+# campaign_config 테이블
+# ─────────────────────────────────────────────
+
+def ensure_campaign_config_table():
+    """campaign_config 테이블 생성 + 기본 행(id=1) 보장."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_config (
+                id               INTEGER PRIMARY KEY DEFAULT 1,
+                affiliate_url    TEXT NOT NULL DEFAULT '',
+                promo_code       TEXT NOT NULL DEFAULT '',
+                caption_template TEXT NOT NULL DEFAULT '',
+                updated_at       TIMESTAMPTZ DEFAULT NOW(),
+                CHECK (id = 1)
+            )
+        """)
+        cur.execute("""
+            INSERT INTO campaign_config (id) VALUES (1)
+            ON CONFLICT (id) DO NOTHING
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("ensure_campaign_config_table: OK")
+    except Exception as e:
+        logger.warning("ensure_campaign_config_table failed: %s", e)
+
+
+def get_campaign_config() -> dict:
+    """campaign_config 설정을 dict로 반환.
+    실패 시 빈 값 dict 반환 (호출부에서 환경변수 폴백 사용).
+    """
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT affiliate_url, promo_code, caption_template, updated_at
+            FROM campaign_config WHERE id = 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return {
+                "affiliate_url":    row[0] or "",
+                "promo_code":       row[1] or "",
+                "caption_template": row[2] or "",
+                "updated_at":       row[3],
+            }
+    except Exception as e:
+        logger.warning("get_campaign_config failed: %s", e)
+    return {"affiliate_url": "", "promo_code": "", "caption_template": "", "updated_at": None}
+
+
+def update_campaign_config(field: str, value: str) -> bool:
+    """campaign_config의 단일 필드를 업데이트한다.
+
+    허용 필드: affiliate_url, promo_code, caption_template
+    SQL injection 방지: 허용 목록 검증 후 f-string 사용 (값은 파라미터 바인딩).
+    """
+    _ALLOWED = {"affiliate_url", "promo_code", "caption_template"}
+    if field not in _ALLOWED:
+        logger.warning("update_campaign_config: 허용되지 않은 필드 %r", field)
+        return False
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE campaign_config SET {field} = %s, updated_at = NOW() WHERE id = 1",
+            (value,),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("update_campaign_config: %s 업데이트 완료", field)
+        return True
+    except Exception as e:
+        logger.warning("update_campaign_config failed (%s): %s", field, e)
+        return False

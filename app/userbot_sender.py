@@ -158,6 +158,22 @@ async def broadcast_via_userbot(
             except Exception:
                 pass
 
+    # ── 0. campaign_config 로드 (DB 우선, 없으면 환경변수 폴백) ──────────────
+    try:
+        from app.pg_broadcast import get_campaign_config
+        _cfg = get_campaign_config()
+    except Exception:
+        _cfg = {}
+
+    effective_affiliate_url = (_cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
+    _db_caption_tmpl        = (_cfg.get("caption_template") or "").strip()
+    _db_promo_code          = (_cfg.get("promo_code") or "").strip()
+
+    # caption_template이 DB에 있으면 우선 사용, 없으면 장전 캡션 그대로
+    effective_caption = _db_caption_tmpl or caption
+    if _db_promo_code and "{promo_code}" in effective_caption:
+        effective_caption = effective_caption.replace("{promo_code}", _db_promo_code)
+
     # ── 1. 파일 다운로드 ──────────────────────────────────────────────────────
     if not file_id or not bot_token:
         await _notify("❌ file_id 또는 bot_token이 없습니다.")
@@ -364,16 +380,16 @@ async def broadcast_via_userbot(
                 if ref and TRACKING_SERVER_URL:
                     link = f"{TRACKING_SERVER_URL}/track/{ref}"
                     user_caption = (
-                        caption.replace(AFFILIATE_URL, link)
-                        if AFFILIATE_URL and AFFILIATE_URL in caption
-                        else caption
+                        effective_caption.replace(effective_affiliate_url, link)
+                        if effective_affiliate_url and effective_affiliate_url in effective_caption
+                        else effective_caption
                     )
                 else:
-                    user_caption = caption
+                    user_caption = effective_caption
 
-                # AFFILIATE_URL 자동 추가 (미포함 시 caption 끝에 줄바꿈 후 추가)
-                if AFFILIATE_URL and AFFILIATE_URL not in user_caption:
-                    user_caption = f"{user_caption}\n{AFFILIATE_URL}"
+                # affiliate_url 자동 추가 (미포함 시 caption 끝에 줄바꿈 후 추가)
+                if effective_affiliate_url and effective_affiliate_url not in user_caption:
+                    user_caption = f"{user_caption}\n{effective_affiliate_url}"
 
                 # 구독봇 링크 추가 (AFFILIATE_URL 아래 줄)
                 _sub_line = "👉 VIP 채널 구독하기\nt.me/blackdog_eve_casino_bot"

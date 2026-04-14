@@ -3,7 +3,7 @@ Subscribe Bot: /start 환영 메시지 + 구독자 DB 저장 + /admin 관리 메
 
 환경변수:
   SUBSCRIBE_BOT_TOKEN  — 이 봇의 토큰 (필수)
-  AFFILIATE_URL        — 환영 메시지 인라인 버튼 URL
+  AFFILIATE_URL        — 환영 메시지 인라인 버튼 URL (campaign_config 폴백)
   ADMIN_ID             — 관리자 Telegram user_id
 """
 from __future__ import annotations
@@ -40,28 +40,57 @@ from bot.handlers.callbacks import (
 logger = logging.getLogger("subscribe_bot")
 
 SUBSCRIBE_BOT_TOKEN = (os.getenv("SUBSCRIBE_BOT_TOKEN") or "").strip()
-AFFILIATE_URL = (os.getenv("AFFILIATE_URL") or "https://t.me").strip()
-ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
-ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "https://t.me").strip()
+ADMIN_ID_RAW        = (os.getenv("ADMIN_ID") or "").strip()
+ADMIN_ID            = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 
 # ── 콜백 데이터 (sub_ 접두사로 admin bot 콜백과 구분) ──────────────────────
-CB_HOME       = "sub_home"
-CB_LOAD       = "sub_load"
-CB_SEND       = "sub_send"
-CB_STATUS     = "sub_status"
-CB_CONFIRM    = "sub_confirm_send"
-CB_CANCEL     = "sub_confirm_cancel"
+CB_HOME           = "sub_home"
+CB_LOAD           = "sub_load"
+CB_SEND           = "sub_send"
+CB_STATUS         = "sub_status"
+CB_CONFIRM        = "sub_confirm_send"
+CB_CANCEL         = "sub_confirm_cancel"
+# 설정 관리
+CB_CONFIG         = "sub_config"
+CB_CONFIG_URL     = "sub_cfg_url"
+CB_CONFIG_PROMO   = "sub_cfg_promo"
+CB_CONFIG_CAPTION = "sub_cfg_cap"
+CB_CONFIG_VIEW    = "sub_cfg_view"
+
+# context.user_data 키: 텍스트 입력 대기 중인 필드명
+_AWAITING_KEY = "sub_awaiting"
+
+# 입력 대기 필드 → 표시 이름 매핑
+_FIELD_LABELS: dict[str, str] = {
+    "affiliate_url":    "어필리에이트 링크",
+    "promo_code":       "프로모코드",
+    "caption_template": "캡션 템플릿",
+}
 
 
 def _is_admin(user_id: int | None) -> bool:
     return ADMIN_ID is not None and user_id is not None and user_id == ADMIN_ID
 
 
+# ── 키보드 헬퍼 ──────────────────────────────────────────────────────────────
+
 def _admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 미디어 장전",     callback_data=CB_LOAD)],
         [InlineKeyboardButton("📤 즉시 전체 발송",  callback_data=CB_SEND)],
         [InlineKeyboardButton("📊 구독자 현황",     callback_data=CB_STATUS)],
+        [InlineKeyboardButton("⚙️ 캠페인 설정",    callback_data=CB_CONFIG)],
+    ])
+
+
+def _config_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 링크 변경",        callback_data=CB_CONFIG_URL)],
+        [InlineKeyboardButton("🎟 프로모코드 변경",   callback_data=CB_CONFIG_PROMO)],
+        [InlineKeyboardButton("📝 캡션 수정",         callback_data=CB_CONFIG_CAPTION)],
+        [InlineKeyboardButton("👁 현재 설정 확인",    callback_data=CB_CONFIG_VIEW)],
+        [InlineKeyboardButton("🏠 메인 메뉴",         callback_data=CB_HOME)],
     ])
 
 
@@ -87,8 +116,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as e:
         logger.warning("subscribe_bot: save user failed: %s", e)
 
+    # campaign_config에서 affiliate_url 읽기 (없으면 환경변수 폴백)
+    try:
+        from app.pg_broadcast import get_campaign_config
+        cfg = get_campaign_config()
+        button_url = cfg.get("affiliate_url") or AFFILIATE_URL
+    except Exception:
+        button_url = AFFILIATE_URL
+
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎰 지금 바로 입장하기", url=AFFILIATE_URL)
+        InlineKeyboardButton("🎰 지금 바로 입장하기", url=button_url)
     ]])
     await update.message.reply_text(
         "🎉 <b>환영합니다!</b>\n\n"
@@ -151,6 +188,54 @@ async def admin_load_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+# ── 텍스트 입력 핸들러 (설정 값 수신) ────────────────────────────────────────
+
+async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """관리자가 설정 값을 텍스트로 입력하면 DB에 저장한다."""
+    if not update.message or not update.effective_user:
+        return
+    if not _is_admin(update.effective_user.id):
+        return
+
+    awaiting: str | None = context.user_data.get(_AWAITING_KEY)
+    if not awaiting:
+        return  # 대기 상태 아님 — 무시
+
+    value = (update.message.text or "").strip()
+    context.user_data.pop(_AWAITING_KEY, None)
+
+    if not value:
+        await update.message.reply_text(
+            "⚠️ 빈 값은 저장할 수 없습니다. 다시 시도하려면 버튼을 눌러주세요.",
+            reply_markup=_config_keyboard(),
+        )
+        return
+
+    try:
+        from app.pg_broadcast import update_campaign_config
+        ok = update_campaign_config(awaiting, value)
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ DB 저장 실패: {e}",
+            reply_markup=_config_keyboard(),
+        )
+        return
+
+    label = _FIELD_LABELS.get(awaiting, awaiting)
+    preview = value[:100] + "..." if len(value) > 100 else value
+    if ok:
+        await update.message.reply_text(
+            f"✅ <b>{label}</b> 업데이트 완료!\n\n<code>{preview}</code>",
+            reply_markup=_config_keyboard(),
+            parse_mode="HTML",
+        )
+    else:
+        await update.message.reply_text(
+            f"❌ {label} 업데이트 실패.",
+            reply_markup=_config_keyboard(),
+        )
+
+
 # ── 콜백 핸들러 ──────────────────────────────────────────────────────────────
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,9 +246,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     data = query.data
     admin = _is_admin(query.from_user.id if query.from_user else None)
 
+    # ── 메인 메뉴 ──────────────────────────────────────────────────────────
     if data == CB_HOME:
         if not admin:
             return
+        context.user_data.pop(_AWAITING_KEY, None)
         await query.message.reply_text(
             "🛠 <b>구독봇 관리자 메뉴</b>",
             reply_markup=_admin_keyboard(),
@@ -171,6 +258,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
+    # ── 미디어 장전 확인 ───────────────────────────────────────────────────
     if data == CB_LOAD:
         if not admin:
             return
@@ -187,6 +275,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.reply_text(text, reply_markup=_home_keyboard())
         return
 
+    # ── 발송 확인 ─────────────────────────────────────────────────────────
     if data == CB_SEND:
         if not admin:
             return
@@ -198,6 +287,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.reply_text("⚠️ 전체 구독자에게 즉시 발송할까요?", reply_markup=keyboard)
         return
 
+    # ── 구독자 현황 ────────────────────────────────────────────────────────
     if data == CB_STATUS:
         if not admin:
             return
@@ -219,6 +309,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
+    # ── 발송 실행 ──────────────────────────────────────────────────────────
     if data == CB_CONFIRM:
         if not admin:
             return
@@ -232,6 +323,80 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.reply_text("취소했습니다.", reply_markup=_home_keyboard())
         return
 
+    # ── 캠페인 설정 메뉴 ──────────────────────────────────────────────────
+    if data == CB_CONFIG:
+        if not admin:
+            return
+        await query.message.reply_text(
+            "⚙️ <b>캠페인 설정</b>\n\n변경할 항목을 선택하세요.",
+            reply_markup=_config_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    if data == CB_CONFIG_URL:
+        if not admin:
+            return
+        context.user_data[_AWAITING_KEY] = "affiliate_url"
+        await query.message.reply_text(
+            "🔗 새 <b>어필리에이트 링크</b>를 입력해주세요.\n\n"
+            "예: <code>https://example.com/?ref=abc</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    if data == CB_CONFIG_PROMO:
+        if not admin:
+            return
+        context.user_data[_AWAITING_KEY] = "promo_code"
+        await query.message.reply_text(
+            "🎟 새 <b>프로모코드</b>를 입력해주세요.\n\n"
+            "캡션 템플릿에서 <code>{promo_code}</code>로 자동 치환됩니다.",
+            parse_mode="HTML",
+        )
+        return
+
+    if data == CB_CONFIG_CAPTION:
+        if not admin:
+            return
+        context.user_data[_AWAITING_KEY] = "caption_template"
+        await query.message.reply_text(
+            "📝 새 <b>캡션 템플릿</b>을 입력해주세요.\n\n"
+            "• <code>{promo_code}</code> 자리표시자 사용 가능\n"
+            "• 비워두면 장전된 미디어의 캡션이 사용됩니다.",
+            parse_mode="HTML",
+        )
+        return
+
+    if data == CB_CONFIG_VIEW:
+        if not admin:
+            return
+        try:
+            from app.pg_broadcast import get_campaign_config
+            cfg = get_campaign_config()
+            url  = cfg.get("affiliate_url")  or "(미설정 — 환경변수 폴백)"
+            promo = cfg.get("promo_code")    or "(미설정)"
+            tmpl  = cfg.get("caption_template") or "(미설정 — 장전 캡션 사용)"
+            updated = cfg.get("updated_at")
+            updated_str = str(updated)[:19] if updated else "없음"
+        except Exception as e:
+            url = promo = tmpl = f"오류: {e}"
+            updated_str = "-"
+
+        url_preview  = url[:60]   + "..." if len(str(url))  > 60  else url
+        tmpl_preview = tmpl[:100] + "..." if len(str(tmpl)) > 100 else tmpl
+
+        await query.message.reply_text(
+            f"👁 <b>현재 캠페인 설정</b>\n\n"
+            f"🔗 링크: <code>{url_preview}</code>\n"
+            f"🎟 프로모코드: <code>{promo}</code>\n"
+            f"📝 캡션: <code>{tmpl_preview}</code>\n\n"
+            f"🕐 마지막 수정: {updated_str}",
+            reply_markup=_config_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
 
 # ── 즉시 발송 (관리자 버튼) ───────────────────────────────────────────────────
 
@@ -241,28 +406,40 @@ async def _do_push(bot, admin_chat_id: int) -> None:
     if not loaded:
         await bot.send_message(admin_chat_id, "❌ 장전된 메시지가 없습니다.")
         return
-    _, _, file_id, file_type, caption = loaded
+    _, _, file_id, file_type, loaded_caption = loaded
     if not file_id:
         await bot.send_message(admin_chat_id, "❌ 파일 ID 없음. 재장전 필요.")
         return
 
     try:
-        from app.pg_broadcast import get_subscribe_users
+        from app.pg_broadcast import get_subscribe_users, get_campaign_config
         users = get_subscribe_users()
+        cfg   = get_campaign_config()
     except Exception as e:
-        await bot.send_message(admin_chat_id, f"❌ 구독자 조회 실패: {e}")
+        await bot.send_message(admin_chat_id, f"❌ DB 조회 실패: {e}")
         return
 
     if not users:
         await bot.send_message(admin_chat_id, "구독자가 없습니다.")
         return
 
+    # campaign_config 적용
+    effective_affiliate_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
+    _db_caption_tmpl        = (cfg.get("caption_template") or "").strip()
+    _db_promo_code          = (cfg.get("promo_code") or "").strip()
+
+    base_caption = _db_caption_tmpl or loaded_caption
+    if _db_promo_code and "{promo_code}" in base_caption:
+        base_caption = base_caption.replace("{promo_code}", _db_promo_code)
+    if effective_affiliate_url and effective_affiliate_url not in base_caption:
+        base_caption = f"{base_caption}\n{effective_affiliate_url}"
+
     from app.userbot_sender import personalize_caption
 
     sent = skipped = failed = 0
     for uid, username in users:
         try:
-            user_caption = await personalize_caption(caption, username)
+            user_caption = await personalize_caption(base_caption, username)
             await _send_media(bot, uid, file_id, file_type, user_caption)
             sent += 1
         except Exception as e:
@@ -302,6 +479,12 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            text_input_handler,
+        )
+    )
     app.add_handler(
         MessageHandler(
             filters.PHOTO | filters.VIDEO | filters.Document.ALL,
