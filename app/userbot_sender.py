@@ -39,7 +39,7 @@ LONG_BREAK_MAX   = float(os.getenv("LONG_BREAK_MAX",   "600"))
 BATCH_SIZE       = int(  os.getenv("BATCH_SIZE",        "50"))
 
 VIP_URL             = (os.getenv("VIP_URL") or "https://1wwtgq.com/?p=mskf").strip()
-AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "").strip()
+AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "").strip()  # campaign_config 폴백 전용
 TRACKING_SERVER_URL = (os.getenv("TRACKING_SERVER_URL") or "").rstrip("/")
 GEMINI_API_KEY      = (os.getenv("GEMINI_API_KEY") or "").strip()
 
@@ -158,13 +158,15 @@ async def broadcast_via_userbot(
             except Exception:
                 pass
 
-    # ── 0. campaign_config 로드 (DB 우선, 없으면 환경변수 폴백) ──────────────
+    # ── 0. campaign_config 로드 (DB 우선, 환경변수는 완전히 폴백) ───────────
     try:
         from app.pg_broadcast import get_campaign_config
         _cfg = get_campaign_config()
-    except Exception:
+    except Exception as _cfg_err:
+        logger.warning("campaign_config 로드 실패, 환경변수 폴백 사용: %s", _cfg_err)
         _cfg = {}
 
+    # affiliate_url: DB 값이 있으면 사용, 없으면 AFFILIATE_URL 환경변수 폴백
     effective_affiliate_url = (_cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
     _db_caption_tmpl        = (_cfg.get("caption_template") or "").strip()
     _db_promo_code          = (_cfg.get("promo_code") or "").strip()

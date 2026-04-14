@@ -40,7 +40,7 @@ from bot.handlers.callbacks import (
 logger = logging.getLogger("subscribe_bot")
 
 SUBSCRIBE_BOT_TOKEN = (os.getenv("SUBSCRIBE_BOT_TOKEN") or "").strip()
-AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "https://t.me").strip()
+AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "https://t.me").strip()  # campaign_config 폴백 전용
 ADMIN_ID_RAW        = (os.getenv("ADMIN_ID") or "").strip()
 ADMIN_ID            = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 
@@ -116,12 +116,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as e:
         logger.warning("subscribe_bot: save user failed: %s", e)
 
-    # campaign_config에서 affiliate_url 읽기 (없으면 환경변수 폴백)
+    # affiliate_url: DB(campaign_config) 우선, DB 실패 시 환경변수 폴백
     try:
         from app.pg_broadcast import get_campaign_config
         cfg = get_campaign_config()
-        button_url = cfg.get("affiliate_url") or AFFILIATE_URL
-    except Exception:
+        button_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
+    except Exception as _e:
+        logger.warning("subscribe_bot: get_campaign_config 실패, 환경변수 폴백: %s", _e)
         button_url = AFFILIATE_URL
 
     keyboard = InlineKeyboardMarkup([[
@@ -411,19 +412,26 @@ async def _do_push(bot, admin_chat_id: int) -> None:
         await bot.send_message(admin_chat_id, "❌ 파일 ID 없음. 재장전 필요.")
         return
 
+    # 구독자 목록 조회 (실패 시 발송 자체가 불가 → 중단)
     try:
-        from app.pg_broadcast import get_subscribe_users, get_campaign_config
+        from app.pg_broadcast import get_subscribe_users
         users = get_subscribe_users()
-        cfg   = get_campaign_config()
     except Exception as e:
-        await bot.send_message(admin_chat_id, f"❌ DB 조회 실패: {e}")
+        await bot.send_message(admin_chat_id, f"❌ 구독자 조회 실패: {e}")
         return
 
     if not users:
         await bot.send_message(admin_chat_id, "구독자가 없습니다.")
         return
 
-    # campaign_config 적용
+    # campaign_config 조회 (실패 시 환경변수 폴백 — 발송은 계속)
+    try:
+        from app.pg_broadcast import get_campaign_config
+        cfg = get_campaign_config()
+    except Exception:
+        cfg = {}
+
+    # affiliate_url: DB 우선, 환경변수 폴백
     effective_affiliate_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
     _db_caption_tmpl        = (cfg.get("caption_template") or "").strip()
     _db_promo_code          = (cfg.get("promo_code") or "").strip()
