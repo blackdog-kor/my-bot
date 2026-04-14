@@ -502,6 +502,46 @@ def get_retry_sent_count() -> int:
 
 
 # ─────────────────────────────────────────────
+# Subscribe Bot 전용 헬퍼
+# ─────────────────────────────────────────────
+
+def get_subscribe_user_ids() -> list[int]:
+    """subscribe_bot source 구독자의 telegram_user_id 목록 반환."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT telegram_user_id FROM broadcast_targets
+            WHERE source = 'subscribe_bot'
+            ORDER BY added_at
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.warning("get_subscribe_user_ids failed: %s", e)
+        return []
+
+
+def count_subscribe_users() -> int:
+    """subscribe_bot source 구독자 수 반환."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM broadcast_targets WHERE source = 'subscribe_bot'"
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return count
+    except Exception as e:
+        logger.warning("count_subscribe_users failed: %s", e)
+        return 0
+
+
+# ─────────────────────────────────────────────
 # loaded_message 테이블 (UserBot Saved Messages ID 보관)
 # ─────────────────────────────────────────────
 

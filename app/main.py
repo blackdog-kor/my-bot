@@ -33,6 +33,18 @@ def _run_bot():
         logger.warning("Bot thread exited: %s", e)
 
 
+def _run_subscribe_bot():
+    try:
+        from bot.subscribe_bot import run_bot as subscribe_run_bot
+        logger.info("Subscribe Bot thread started")
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(subscribe_run_bot())
+    except Exception as e:
+        logger.warning("Subscribe Bot thread exited: %s", e)
+
+
 def _run_scheduler():
     try:
         from app.scheduler import run_scheduler_forever
@@ -57,12 +69,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("ensure_loaded_message_table: %s", e)
 
-    # Bot 스레드 시작
+    # Admin Bot 스레드 시작
     try:
         bot_thread = threading.Thread(target=_run_bot, daemon=True)
         bot_thread.start()
     except Exception as e:
         logger.warning("Bot thread start failed: %s", e)
+
+    # Subscribe Bot 스레드 시작 (SUBSCRIBE_BOT_TOKEN이 설정된 경우에만)
+    if (os.getenv("SUBSCRIBE_BOT_TOKEN") or "").strip():
+        try:
+            sub_thread = threading.Thread(target=_run_subscribe_bot, daemon=True)
+            sub_thread.start()
+        except Exception as e:
+            logger.warning("Subscribe Bot thread start failed: %s", e)
+    else:
+        logger.info("SUBSCRIBE_BOT_TOKEN 미설정 — Subscribe Bot 비활성화")
 
     # Scheduler 스레드 시작
     try:

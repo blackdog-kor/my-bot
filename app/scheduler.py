@@ -109,6 +109,13 @@ def _job_retry_sender() -> None:
         _notify("🔁 재발송 Job 완료" if ok else "🔁 재발송 Job 실패")
 
 
+def _job_subscribe_push() -> None:
+    with _job_lock:
+        _notify("⏰ 구독봇 자동 푸시 Job 시작 (09:00 KST)")
+        ok = _run_script("subscribe_push.py", "구독봇 푸시(subscribe_push)")
+        _notify("⏰ 구독봇 자동 푸시 Job 완료" if ok else "⏰ 구독봇 자동 푸시 Job 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -135,6 +142,12 @@ def run_scheduler_forever() -> None:
         trigger=CronTrigger(hour=12, minute=0),
         id="retry_sender",
     )
+    # 00:00 UTC (09:00 KST) — 구독봇 자동 푸시 (subscribe_push)
+    scheduler.add_job(
+        _job_subscribe_push,
+        trigger=CronTrigger(hour=0, minute=0),
+        id="subscribe_push",
+    )
     scheduler.start()
 
     # 다음 예약 Job 목록 로그
@@ -142,7 +155,7 @@ def run_scheduler_forever() -> None:
     for j in jobs:
         logger.info("다음 예약: %s — %s", j.id, j.next_run_time)
     print(
-        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / 발송 06:00 / 재발송 12:00 ---",
+        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / 발송 06:00 / 재발송 12:00 / 구독봇 푸시 00:00(UTC=09KST) ---",
         flush=True,
     )
 
