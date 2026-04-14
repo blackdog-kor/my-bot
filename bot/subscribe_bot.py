@@ -247,20 +247,23 @@ async def _do_push(bot, admin_chat_id: int) -> None:
         return
 
     try:
-        from app.pg_broadcast import get_subscribe_user_ids
-        user_ids = get_subscribe_user_ids()
+        from app.pg_broadcast import get_subscribe_users
+        users = get_subscribe_users()
     except Exception as e:
         await bot.send_message(admin_chat_id, f"❌ 구독자 조회 실패: {e}")
         return
 
-    if not user_ids:
+    if not users:
         await bot.send_message(admin_chat_id, "구독자가 없습니다.")
         return
 
+    from app.userbot_sender import personalize_caption
+
     sent = skipped = failed = 0
-    for uid in user_ids:
+    for uid, username in users:
         try:
-            await _send_media(bot, uid, file_id, file_type, caption)
+            user_caption = await personalize_caption(caption, username)
+            await _send_media(bot, uid, file_id, file_type, user_caption)
             sent += 1
         except Exception as e:
             err = str(e).lower()

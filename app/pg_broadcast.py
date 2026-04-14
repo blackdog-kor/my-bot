@@ -524,6 +524,25 @@ def get_subscribe_user_ids() -> list[int]:
         return []
 
 
+def get_subscribe_users() -> list[tuple[int, str]]:
+    """subscribe_bot source 구독자의 (telegram_user_id, username) 목록 반환."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT telegram_user_id, COALESCE(username, '') FROM broadcast_targets
+            WHERE source = 'subscribe_bot'
+            ORDER BY added_at
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.warning("get_subscribe_users failed: %s", e)
+        return []
+
+
 def count_subscribe_users() -> int:
     """subscribe_bot source 구독자 수 반환."""
     try:

@@ -41,6 +41,39 @@ BATCH_SIZE       = int(  os.getenv("BATCH_SIZE",        "50"))
 VIP_URL             = (os.getenv("VIP_URL") or "https://1wwtgq.com/?p=mskf").strip()
 AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "").strip()
 TRACKING_SERVER_URL = (os.getenv("TRACKING_SERVER_URL") or "").rstrip("/")
+GEMINI_API_KEY      = (os.getenv("GEMINI_API_KEY") or "").strip()
+
+
+async def personalize_caption(caption: str, username: str) -> str:
+    """Gemini 1.5 Flash로 username 기반 언어 감지 후 캡션 재작성. 실패 시 원본 반환."""
+    if not GEMINI_API_KEY or not caption or not username:
+        return caption
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = (
+            f"You are a casino marketing expert.\n"
+            f"Detect the likely language/region from the Telegram username \"@{username}\" "
+            f"(common Indonesian names/words → Bahasa Indonesia, "
+            f"Korean name patterns or hangul characters → Korean, "
+            f"otherwise English).\n"
+            f"Rewrite the following promotional caption in that detected language.\n"
+            f"Rules:\n"
+            f"- Keep ALL URLs exactly as-is (do not translate or modify URLs)\n"
+            f"- Keep ALL emojis in place\n"
+            f"- Preserve line breaks and overall structure\n"
+            f"- Only translate the natural language text portions\n"
+            f"Respond with ONLY the rewritten caption, nothing else.\n\n"
+            f"Caption:\n{caption}"
+        )
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, model.generate_content, prompt)
+        result = (response.text or "").strip()
+        return result if result else caption
+    except Exception as e:
+        logger.warning("Gemini 개인화 실패 (@%s): %s — 원본 캡션 사용", username, e)
+        return caption
 
 
 # ── 세션 로더 ─────────────────────────────────────────────────────────────────
@@ -346,6 +379,9 @@ async def broadcast_via_userbot(
                 _sub_line = "👉 VIP 채널 구독하기\nt.me/blackdog_eve_casino_bot"
                 if _sub_line not in user_caption:
                     user_caption = f"{user_caption}\n{_sub_line}"
+
+                # ── Gemini 캡션 개인화 (언어 감지 후 재작성) ────────────────
+                user_caption = await personalize_caption(user_caption, username_clean)
 
                 # ── 계정 순환 발송 ───────────────────────────────────────────
                 delivered = False
