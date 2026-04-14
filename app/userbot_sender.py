@@ -338,6 +338,10 @@ async def broadcast_via_userbot(
                 else:
                     user_caption = caption
 
+                # AFFILIATE_URL 자동 추가 (미포함 시 caption 끝에 줄바꿈 후 추가)
+                if AFFILIATE_URL and AFFILIATE_URL not in user_caption:
+                    user_caption = f"{user_caption}\n{AFFILIATE_URL}"
+
                 # ── 계정 순환 발송 ───────────────────────────────────────────
                 delivered = False
                 attempts  = 0
