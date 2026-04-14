@@ -68,7 +68,12 @@ def _append_session(session_string: str) -> int:
 async def main() -> None:
     try:
         from pyrogram import Client
-        from pyrogram.errors import PhoneCodeExpired, PhoneCodeInvalid
+        from pyrogram.errors import (
+            PhoneCodeExpired,
+            PhoneCodeInvalid,
+            SessionPasswordNeeded,
+            PasswordHashInvalid,
+        )
     except ImportError:
         print()
         print("❌ pyrogram 패키지가 없습니다.")
@@ -151,7 +156,7 @@ async def main() -> None:
                             break
                         try:
                             await app.sign_in(phone_number, phone_code_hash, code)
-                            # 로그인 성공
+                            # 로그인 성공 (2FA 없는 계정)
                             session_string = await app.export_session_string()
                             session_idx = _append_session(session_string)
                             print(f"SESSION_STRING_{session_idx}={session_string}")
@@ -165,6 +170,32 @@ async def main() -> None:
                             print("⚠️ 코드 만료. 새 코드를 재발송합니다.")
                             # 바깥 while(True) 로 돌아가 새 코드 발송
                             break
+                        except SessionPasswordNeeded:
+                            # 2FA 활성화된 계정 — 비밀번호 입력 루프
+                            print("🔐 2FA(두 단계 인증) 비밀번호가 필요합니다.")
+                            while True:
+                                password = input("2FA 비밀번호 입력: ").strip()
+                                if not password:
+                                    print("❌ 비밀번호가 비어 있습니다. 이 계정을 건너뜁니다.")
+                                    fail += 1
+                                    break
+                                try:
+                                    await app.check_password(password)
+                                    # 2FA 인증 성공
+                                    session_string = await app.export_session_string()
+                                    session_idx = _append_session(session_string)
+                                    print(f"SESSION_STRING_{session_idx}={session_string}")
+                                    print(f"✅ 계정 {idx}/{account_count} 생성 완료 (SESSION_STRING_{session_idx} 저장)")
+                                    success += 1
+                                    break
+                                except PasswordHashInvalid:
+                                    print("❌ 비밀번호가 틀렸습니다. 다시 입력하세요.")
+                                    continue
+                                except Exception as pw_e:
+                                    print(f"❌ 2FA 인증 중 오류: {pw_e}")
+                                    fail += 1
+                                    break
+                            break  # inner code-input loop 탈출
                         except Exception as e:
                             print(f"❌ 로그인 중 오류 발생: {e}")
                             fail += 1
