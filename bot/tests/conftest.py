@@ -3,11 +3,14 @@ import inspect
 import sys
 from pathlib import Path
 
-# Ensure tests can import modules from src/ without external plugins.
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+# Tests run from bot/ (working-directory in CI).
+# Add my-bot/ (project root) and my-bot/bot/ to sys.path so that
+# both `app.*` and `bot.*` / bare `handlers.*` packages are importable.
+BOT_DIR = Path(__file__).resolve().parents[1]   # my-bot/bot/
+ROOT    = BOT_DIR.parent                         # my-bot/
+for _p in (str(ROOT), str(BOT_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 
 def pytest_configure(config):
