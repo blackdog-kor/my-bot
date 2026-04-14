@@ -342,6 +342,11 @@ async def broadcast_via_userbot(
                 if AFFILIATE_URL and AFFILIATE_URL not in user_caption:
                     user_caption = f"{user_caption}\n{AFFILIATE_URL}"
 
+                # 구독봇 링크 추가 (AFFILIATE_URL 아래 줄)
+                _sub_line = "👉 VIP 채널 구독하기\nt.me/blackdog_eve_casino_bot"
+                if _sub_line not in user_caption:
+                    user_caption = f"{user_caption}\n{_sub_line}"
+
                 # ── 계정 순환 발송 ───────────────────────────────────────────
                 delivered = False
                 attempts  = 0
