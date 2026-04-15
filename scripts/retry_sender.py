@@ -1,10 +1,9 @@
 """
 재발송: is_sent=TRUE, click_count=0, retry_sent=FALSE, sent_at 기준 3일 경과.
-RETRY_CAPTION 환경변수로 별도 캡션 사용 (없으면 원본 캡션 유지).
 실행: python scripts/retry_sender.py (또는 스케줄러 12:00)
 
 발송 흐름:
-  1. loaded_message 에서 file_id / file_type 읽기
+  1. campaign_posts.get_next_post() 에서 file_id / file_type 읽기
   2. get_retry_targets() 로 재발송 대상 조회
   3. Bot API 파일 다운로드 → Pyrogram 다중 계정으로 발송
   4. mark_retry_sent() 로 DB 업데이트
@@ -37,8 +36,6 @@ API_HASH = (os.getenv("API_HASH") or "").strip()
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
 ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
-RETRY_CAPTION = (os.getenv("RETRY_CAPTION") or "").strip()
-
 VIP_URL          = (os.getenv("VIP_URL") or "https://1wwtgq.com/?p=mskf").strip()
 USER_DELAY_MIN   = float(os.getenv("USER_DELAY_MIN",   "3"))
 USER_DELAY_MAX   = float(os.getenv("USER_DELAY_MAX",   "7"))
@@ -109,28 +106,23 @@ async def main() -> None:
         UserNotParticipant,
         RPCError,
     )
-    from app.pg_broadcast import get_retry_targets, mark_retry_sent, get_loaded_message_full_pg as get_loaded_message_full
+    from app.pg_broadcast import get_retry_targets, mark_retry_sent, get_next_post
 
     print("\n" + "=" * 62)
     print("   재발송 스크립트  (3일 경과 미클릭 유저)")
     print("=" * 62)
 
-    # ── 1. 장전된 메시지 확인 ──────────────────────────────────────────────────
-    loaded = get_loaded_message_full()
-    if not loaded:
-        msg = "❌ 재발송 실패: 장전된 메시지가 없습니다."
+    # ── 1. 게시물 확인 ────────────────────────────────────────────────────────
+    post = get_next_post()
+    if not post or not post.get("file_id"):
+        msg = "❌ 재발송 실패: campaign_posts에 활성 게시물이 없습니다."
         print(msg)
         await _notify(msg)
         return
 
-    _chat_id, _msg_id, file_id, file_type, original_caption = loaded
-    if not file_id:
-        msg = "❌ 재발송 실패: loaded_message에 file_id가 비어 있습니다."
-        print(msg)
-        await _notify(msg)
-        return
-
-    caption = RETRY_CAPTION or original_caption
+    file_id   = post["file_id"]
+    file_type = post["file_type"]
+    caption   = post["caption"] or ""
 
     # ── 2. 재발송 대상 확인 ───────────────────────────────────────────────────
     targets = get_retry_targets()
@@ -143,7 +135,7 @@ async def main() -> None:
     await _notify(
         f"🔁 재발송 시작\n"
         f"• 대상: {len(targets)}명\n"
-        f"• 캡션: {'RETRY_CAPTION' if RETRY_CAPTION else '원본 유지'}"
+        f"• 캡션: 게시물 원본 사용"
     )
 
     # ── 3. 파일 다운로드 ──────────────────────────────────────────────────────

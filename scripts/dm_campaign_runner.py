@@ -1,6 +1,6 @@
 """
-UserBot DM 캠페인 자동 실행 (통합 scripts/).
-장전된 메시지(PostgreSQL loaded_message)로 발송.
+UserBot DM 캠페인 자동 실행.
+campaign_posts 테이블의 다음 게시물(순환)로 발송.
 실행: python scripts/dm_campaign_runner.py (또는 스케줄러 06:00)
 """
 from __future__ import annotations
@@ -20,11 +20,11 @@ load_dotenv(ROOT / ".env", override=True)
 load_dotenv(ROOT / "bot" / ".env", override=True)
 
 from app.userbot_sender import broadcast_via_userbot
-from app.pg_broadcast import get_campaign_stats, get_loaded_message_full_pg as get_loaded_message_full
+from app.pg_broadcast import get_campaign_stats, get_next_post
 
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+BOT_TOKEN    = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
-ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+ADMIN_ID     = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 
 
 async def _notify(text: str) -> None:
@@ -61,24 +61,29 @@ async def _send_preview(file_id: str, file_type: str, caption: str) -> None:
 
 
 async def main() -> None:
-    loaded = get_loaded_message_full()
-    if not loaded:
-        print("❌ 장전된 메시지가 없습니다.")
+    post = get_next_post()
+    if not post or not post.get("file_id"):
+        print("❌ 발송할 게시물이 없습니다.")
         await _notify(
             "❌ DM 캠페인 실행 실패\n"
-            "장전된 메시지가 없습니다. 봇 채팅에서 /admin → 이미지를 다시 장전해 주세요."
+            "campaign_posts에 활성 게시물이 없습니다.\n"
+            "구독봇 /admin → ➕ 게시물 추가 후 다시 시도해주세요."
         )
         return
-    _chat_id, _message_id, file_id, file_type, caption = loaded
-    if not file_id:
-        print("❌ loaded_message에 file_id가 비어 있습니다.")
-        await _notify("❌ DM 캠페인 실행 실패\nloaded_message에 file_id가 비어 있습니다.")
-        return
+
+    file_id   = post["file_id"]
+    file_type = post["file_type"]
+    caption   = post["caption"] or ""
+    post_id   = post["id"]
+
     if not BOT_TOKEN:
         print("❌ BOT_TOKEN이 설정되지 않았습니다.")
         return
 
-    await _notify("🚀 DM 캠페인 자동 실행 시작\n아래 미리보기가 이번 캠페인에서 발송될 게시물입니다.")
+    await _notify(
+        f"🚀 DM 캠페인 자동 실행 시작 (게시물 #{post_id})\n"
+        "아래 미리보기가 이번 캠페인에서 발송될 게시물입니다."
+    )
     await _send_preview(file_id=file_id, file_type=file_type, caption=caption)
 
     try:
@@ -95,7 +100,7 @@ async def main() -> None:
         return
 
     summary = (
-        "🎉 DM 캠페인 자동 실행 완료\n"
+        f"🎉 DM 캠페인 자동 실행 완료 (게시물 #{post_id})\n"
         f"• 발송 대상: {result.get('total', 0)}명\n"
         f"• 성공: {result.get('sent', 0)}명\n"
         f"• 차단/탈퇴/미존재: {result.get('skipped', 0)}명\n"

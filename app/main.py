@@ -64,10 +64,10 @@ async def lifespan(app: FastAPI):
         logger.warning("ensure_pg_table: %s", e)
 
     try:
-        from app.pg_broadcast import ensure_loaded_message_table
-        ensure_loaded_message_table()
+        from app.pg_broadcast import ensure_campaign_posts_table
+        ensure_campaign_posts_table()
     except Exception as e:
-        logger.warning("ensure_loaded_message_table: %s", e)
+        logger.warning("ensure_campaign_posts_table: %s", e)
 
     try:
         from app.pg_broadcast import ensure_campaign_config_table
@@ -292,13 +292,14 @@ async def debug_session_test():
 
 @app.get("/debug/status")
 async def debug_status():
-    # 1. loaded_message 확인
+    # 1. campaign_posts 확인
     try:
-        from app.pg_broadcast import get_loaded_message
-        loaded = get_loaded_message()
-        loaded_status = str(loaded) if loaded else "None (장전 없음)"
+        from app.pg_broadcast import list_posts
+        posts = list_posts()
+        active_posts = sum(1 for p in posts if p.get("is_active"))
+        posts_status = f"전체 {len(posts)}개 / 활성 {active_posts}개"
     except Exception as e:
-        loaded_status = f"오류: {e}"
+        posts_status = f"오류: {e}"
 
     # 2. SESSION_STRING 개수 확인
     sessions = []
@@ -331,7 +332,7 @@ async def debug_status():
         db_status = f"오류: {e}"
 
     return {
-        "loaded_message": loaded_status,
+        "campaign_posts": posts_status,
         "sessions": sessions,
         "session_count": len(sessions),
         "unsent_targets": unsent,

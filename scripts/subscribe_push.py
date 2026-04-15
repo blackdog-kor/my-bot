@@ -44,8 +44,7 @@ async def _send_media(bot, chat_id: int, file_id: str, file_type: str, caption: 
 
 async def main() -> None:
     from telegram import Bot
-    from app.pg_broadcast import get_loaded_message_full_pg as get_loaded_message_full
-    from app.pg_broadcast import get_subscribe_users, get_campaign_config
+    from app.pg_broadcast import get_next_post, get_subscribe_users, get_campaign_config
     from app.userbot_sender import personalize_caption
 
     if not SUBSCRIBE_BOT_TOKEN:
@@ -54,40 +53,39 @@ async def main() -> None:
 
     bot = Bot(token=SUBSCRIBE_BOT_TOKEN)
 
-    # 장전된 미디어 확인
-    loaded = get_loaded_message_full()
-    if not loaded:
-        msg = "⏰ [09:00 KST 자동 푸시] ❌ 장전된 미디어가 없습니다."
+    # 다음 게시물 확인 (last_sent_at 갱신 포함)
+    post = get_next_post()
+    if not post or not post.get("file_id"):
+        msg = (
+            "⏰ [09:00 KST 자동 푸시] ❌ 발송할 게시물이 없습니다.\n"
+            "구독봇 /admin → ➕ 게시물 추가해주세요."
+        )
         logger.warning(msg)
         if ADMIN_ID:
             await bot.send_message(ADMIN_ID, msg)
         return
 
-    _, _, file_id, file_type, loaded_caption = loaded
-    if not file_id:
-        msg = "⏰ [09:00 KST 자동 푸시] ❌ 파일 ID 없음. 재장전 필요."
-        logger.warning(msg)
-        if ADMIN_ID:
-            await bot.send_message(ADMIN_ID, msg)
-        return
+    file_id   = post["file_id"]
+    file_type = post["file_type"]
+    post_cap  = post["caption"] or ""
+    post_id   = post["id"]
 
-    # campaign_config 로드 (DB 우선, 없으면 환경변수 폴백)
+    # campaign_config 로드
     try:
         cfg = get_campaign_config()
     except Exception:
         cfg = {}
 
-    effective_affiliate_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
-    _db_caption_tmpl        = (cfg.get("caption_template") or "").strip()
-    _db_promo_code          = (cfg.get("promo_code") or "").strip()
+    _db_caption_tmpl = (cfg.get("caption_template") or "").strip()
+    _db_promo_code   = (cfg.get("promo_code") or "").strip()
 
-    base_caption = _db_caption_tmpl or loaded_caption
+    base_caption = _db_caption_tmpl or post_cap
     if _db_promo_code and "{promo_code}" in base_caption:
         base_caption = base_caption.replace("{promo_code}", _db_promo_code)
 
-    # 구독자 목록 (id + username)
+    # 구독자 목록
     users = get_subscribe_users()
-    logger.info("자동 푸시: 총 %d명에게 발송 시작", len(users))
+    logger.info("자동 푸시: 총 %d명에게 발송 시작 (게시물 #%s)", len(users), post_id)
 
     if not users:
         msg = "⏰ [09:00 KST 자동 푸시] 구독자가 없습니다."
@@ -109,10 +107,10 @@ async def main() -> None:
             else:
                 failed += 1
                 logger.warning("send failed to %d: %s", uid, e)
-        await asyncio.sleep(0.05)  # ~20 msg/sec (Bot API 제한 준수)
+        await asyncio.sleep(0.05)
 
     result = (
-        f"⏰ [09:00 KST 자동 푸시] 완료!\n"
+        f"⏰ [09:00 KST 자동 푸시] 완료! (게시물 #{post_id})\n"
         f"• 성공: {sent}명\n"
         f"• 차단/탈퇴: {skipped}명\n"
         f"• 실패: {failed}명"

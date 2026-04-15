@@ -561,146 +561,156 @@ def count_subscribe_users() -> int:
 
 
 # ─────────────────────────────────────────────
-# loaded_message 테이블 (UserBot Saved Messages ID 보관)
+# campaign_posts 테이블
 # ─────────────────────────────────────────────
 
-def ensure_loaded_message_table():
+def ensure_campaign_posts_table():
+    """campaign_posts 테이블 생성."""
     try:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS loaded_message (
-                id                 INTEGER PRIMARY KEY DEFAULT 1,
-                userbot_message_id INTEGER,
-                file_id            TEXT    NOT NULL DEFAULT '',
-                file_type          TEXT    NOT NULL DEFAULT 'photo',
-                caption            TEXT    NOT NULL DEFAULT '',
-                chat_id            BIGINT  NOT NULL DEFAULT 0,
-                message_id         BIGINT  NOT NULL DEFAULT 0,
-                updated_at         TIMESTAMPTZ DEFAULT NOW()
+            CREATE TABLE IF NOT EXISTS campaign_posts (
+                id           SERIAL PRIMARY KEY,
+                file_id      TEXT NOT NULL,
+                file_type    TEXT NOT NULL DEFAULT 'photo',
+                caption      TEXT NOT NULL DEFAULT '',
+                is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+                send_order   INTEGER NOT NULL DEFAULT 0,
+                last_sent_at TIMESTAMPTZ,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
             )
         """)
         conn.commit()
-
-        # 기존 테이블 마이그레이션 (누락 컬럼 추가)
-        columns_to_add = [
-            ("userbot_message_id", "INTEGER"),
-            ("file_id",            "TEXT NOT NULL DEFAULT ''"),
-            ("file_type",          "TEXT NOT NULL DEFAULT 'photo'"),
-            ("caption",            "TEXT NOT NULL DEFAULT ''"),
-            ("chat_id",            "BIGINT NOT NULL DEFAULT 0"),
-            ("message_id",         "BIGINT NOT NULL DEFAULT 0"),
-            ("updated_at",         "TIMESTAMPTZ DEFAULT NOW()"),
-        ]
-        for col_name, col_type in columns_to_add:
-            try:
-                cur.execute(
-                    f"ALTER TABLE loaded_message ADD COLUMN {col_name} {col_type}"
-                )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-
         cur.close()
         conn.close()
-        logger.info("ensure_loaded_message_table: OK")
+        logger.info("ensure_campaign_posts_table: OK")
     except Exception as e:
-        logger.warning("ensure_loaded_message_table failed: %s", e)
+        logger.warning("ensure_campaign_posts_table failed: %s", e)
 
 
-def get_loaded_message_full_pg() -> tuple[int, int, str, str, str] | None:
-    """(chat_id, message_id, file_id, file_type, caption) 반환. 없거나 file_id 없으면 None."""
+def get_next_post() -> dict | None:
+    """순환 발송용: 활성 게시물 중 last_sent_at이 가장 오래된 것 반환 + last_sent_at 갱신."""
     try:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            SELECT chat_id, message_id, file_id, file_type, caption
-            FROM loaded_message WHERE id = 1
+            SELECT id, file_id, file_type, caption, is_active, send_order, last_sent_at
+            FROM campaign_posts
+            WHERE is_active = TRUE
+            ORDER BY COALESCE(last_sent_at, '1970-01-01'::timestamptz) ASC, send_order ASC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            conn.close()
+            return None
+        post_id = row[0]
+        cur.execute(
+            "UPDATE campaign_posts SET last_sent_at = NOW() WHERE id = %s",
+            (post_id,),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {
+            "id": row[0], "file_id": row[1], "file_type": row[2],
+            "caption": row[3], "is_active": row[4],
+            "send_order": row[5], "last_sent_at": row[6],
+        }
+    except Exception as e:
+        logger.warning("get_next_post failed: %s", e)
+        return None
+
+
+def get_current_post() -> dict | None:
+    """/start 환영 메시지 등 비소모성 조회용 (last_sent_at 변경 없음)."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, file_id, file_type, caption, is_active, send_order, last_sent_at
+            FROM campaign_posts
+            WHERE is_active = TRUE
+            ORDER BY COALESCE(last_sent_at, '1970-01-01'::timestamptz) ASC, send_order ASC
+            LIMIT 1
         """)
         row = cur.fetchone()
         cur.close()
         conn.close()
-        if row is None or not (row[2] or "").strip():
+        if not row:
             return None
-        return (int(row[0]), int(row[1]), row[2] or "", row[3] or "photo", row[4] or "")
+        return {
+            "id": row[0], "file_id": row[1], "file_type": row[2],
+            "caption": row[3], "is_active": row[4],
+            "send_order": row[5], "last_sent_at": row[6],
+        }
     except Exception as e:
-        logger.warning("get_loaded_message_full_pg failed: %s", e)
+        logger.warning("get_current_post failed: %s", e)
         return None
 
 
-def set_loaded_message_pg(
-    chat_id: int,
-    message_id: int,
-    *,
-    file_id: str = "",
-    file_type: str = "photo",
-    caption: str = "",
-) -> bool:
-    """PG loaded_message 저장. 성공 True, 실패 False."""
+def add_post(file_id: str, file_type: str, caption: str, send_order: int = 0) -> int | None:
+    """게시물 추가. 삽입된 id 반환. 실패 시 None."""
     try:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO loaded_message (id, chat_id, message_id, file_id, file_type, caption, updated_at)
-            VALUES (1, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (id) DO UPDATE
-                SET chat_id    = EXCLUDED.chat_id,
-                    message_id = EXCLUDED.message_id,
-                    file_id    = EXCLUDED.file_id,
-                    file_type  = EXCLUDED.file_type,
-                    caption    = EXCLUDED.caption,
-                    updated_at = NOW()
-        """, (chat_id, message_id, file_id, file_type, caption))
+            INSERT INTO campaign_posts (file_id, file_type, caption, send_order)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (file_id, file_type, caption, send_order))
+        row = cur.fetchone()
         conn.commit()
         cur.close()
         conn.close()
-        logger.info("set_loaded_message_pg: OK (file_id=%s, type=%s)", file_id[:20], file_type)
-        return True
+        return row[0] if row else None
     except Exception as e:
-        logger.warning("set_loaded_message_pg failed: %s", e)
+        logger.warning("add_post failed: %s", e)
+        return None
+
+
+def delete_post(post_id: int) -> bool:
+    """게시물 삭제. 성공 True."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM campaign_posts WHERE id = %s", (post_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+        cur.close()
+        conn.close()
+        return deleted
+    except Exception as e:
+        logger.warning("delete_post failed: %s", e)
         return False
 
 
-def save_loaded_message(userbot_message_id: int, file_type: str, caption: str):
+def list_posts() -> list[dict]:
+    """전체 게시물 목록 반환 (send_order, created_at 순)."""
     try:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO loaded_message (id, userbot_message_id, file_type, caption, updated_at)
-            VALUES (1, %s, %s, %s, NOW())
-            ON CONFLICT (id) DO UPDATE
-                SET userbot_message_id = EXCLUDED.userbot_message_id,
-                    file_type          = EXCLUDED.file_type,
-                    caption            = EXCLUDED.caption,
-                    updated_at         = NOW()
-        """, (userbot_message_id, file_type, caption))
-        conn.commit()
-        cur.close()
-        conn.close()
-        logger.info("save_loaded_message: OK (msg_id=%s)", userbot_message_id)
-    except Exception as e:
-        logger.warning("save_loaded_message failed: %s", e)
-
-
-def get_loaded_message():
-    """Returns (userbot_message_id, file_type, caption) or None"""
-    try:
-        conn = _get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT userbot_message_id, file_type, caption
-            FROM loaded_message
-            WHERE id = 1
+            SELECT id, file_id, file_type, caption, is_active, send_order, last_sent_at, created_at
+            FROM campaign_posts
+            ORDER BY send_order ASC, created_at ASC
         """)
-        row = cur.fetchone()
+        rows = cur.fetchall()
         cur.close()
         conn.close()
-        if row is None or row[0] is None:
-            return None
-        return (int(row[0]), row[1] or "photo", row[2] or "")
+        return [
+            {
+                "id": r[0], "file_id": r[1], "file_type": r[2],
+                "caption": r[3], "is_active": r[4], "send_order": r[5],
+                "last_sent_at": r[6], "created_at": r[7],
+            }
+            for r in rows
+        ]
     except Exception as e:
-        logger.warning("get_loaded_message failed: %s", e)
-        return None
+        logger.warning("list_posts failed: %s", e)
+        return []
 
 
 # ─────────────────────────────────────────────
