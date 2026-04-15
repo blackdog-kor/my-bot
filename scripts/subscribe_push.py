@@ -44,7 +44,7 @@ async def _send_media(bot, chat_id: int, file_id: str, file_type: str, caption: 
 
 async def main() -> None:
     from telegram import Bot
-    from bot.handlers.callbacks import get_loaded_message_full
+    from app.pg_broadcast import get_loaded_message_full_pg as get_loaded_message_full
     from app.pg_broadcast import get_subscribe_users, get_campaign_config
     from app.userbot_sender import personalize_caption
 

@@ -1,8 +1,9 @@
 """
 Admin Bot 핸들러: /start, /admin — 캠페인 현황 조회.
 
-subscribe_bot.py 와 subscribe_push.py 에서 공유하는
-SQLite loaded_message 헬퍼(get_loaded_message_full, set_loaded_message)도 여기서 관리.
+get_loaded_message_full / set_loaded_message:
+  PostgreSQL 우선, 실패 시 SQLite 폴백.
+  subscribe_bot.py, subscribe_push.py, dm_campaign_runner.py 등에서 공유.
 """
 from __future__ import annotations
 
@@ -62,14 +63,28 @@ _DB = _ensure_db()
 
 
 def get_loaded_message_full() -> tuple[int, int, str, str, str] | None:
-    """(chat_id, message_id, file_id, file_type, caption) 반환. 없으면 None."""
-    cur = _DB.execute(
-        "SELECT chat_id, message_id, file_id, file_type, caption FROM loaded_message WHERE id = 1"
-    )
-    row = cur.fetchone()
-    if not row:
-        return None
-    return (row[0], row[1], row[2] or "", row[3] or "photo", row[4] or "")
+    """(chat_id, message_id, file_id, file_type, caption) 반환. PostgreSQL 우선, SQLite 폴백."""
+    # ── PostgreSQL 우선 ──
+    try:
+        from app.pg_broadcast import get_loaded_message_full_pg
+        result = get_loaded_message_full_pg()
+        if result is not None:
+            return result
+    except Exception as e:
+        logger.warning("get_loaded_message_full PG 실패, SQLite 폴백: %s", e)
+
+    # ── SQLite 폴백 ──
+    try:
+        cur = _DB.execute(
+            "SELECT chat_id, message_id, file_id, file_type, caption FROM loaded_message WHERE id = 1"
+        )
+        row = cur.fetchone()
+        if row and (row[2] or "").strip():
+            return (row[0], row[1], row[2] or "", row[3] or "photo", row[4] or "")
+    except Exception as e:
+        logger.warning("get_loaded_message_full SQLite 폴백도 실패: %s", e)
+
+    return None
 
 
 def set_loaded_message(
@@ -80,14 +95,29 @@ def set_loaded_message(
     file_type: str = "photo",
     caption: str = "",
 ) -> None:
-    now = datetime.utcnow().isoformat()
-    _DB.execute(
-        """INSERT OR REPLACE INTO loaded_message
-           (id, chat_id, message_id, file_id, file_type, caption, loaded_at)
-           VALUES (1, ?, ?, ?, ?, ?, ?)""",
-        (chat_id, message_id, file_id, file_type, caption, now),
-    )
-    _DB.commit()
+    """PostgreSQL에 저장. SQLite에도 동기 저장(폴백 보장)."""
+    # ── PostgreSQL 저장 ──
+    try:
+        from app.pg_broadcast import set_loaded_message_pg
+        set_loaded_message_pg(
+            chat_id, message_id,
+            file_id=file_id, file_type=file_type, caption=caption,
+        )
+    except Exception as e:
+        logger.warning("set_loaded_message PG 저장 실패: %s", e)
+
+    # ── SQLite 동기 저장 (폴백) ──
+    try:
+        now = datetime.utcnow().isoformat()
+        _DB.execute(
+            """INSERT OR REPLACE INTO loaded_message
+               (id, chat_id, message_id, file_id, file_type, caption, loaded_at)
+               VALUES (1, ?, ?, ?, ?, ?, ?)""",
+            (chat_id, message_id, file_id, file_type, caption, now),
+        )
+        _DB.commit()
+    except Exception as e:
+        logger.warning("set_loaded_message SQLite 저장 실패: %s", e)
 
 
 def _is_admin(user_id: int | None) -> bool:

@@ -31,7 +31,7 @@ if str(ROOT) not in sys.path:
 from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
-# 기존 admin bot의 SQLite loaded_message 공유 (같은 프로세스 내)
+# loaded_message 헬퍼 (PG 우선, SQLite 폴백)
 from bot.handlers.callbacks import (
     get_loaded_message_full,
     set_loaded_message,

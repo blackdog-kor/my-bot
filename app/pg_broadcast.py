@@ -572,18 +572,24 @@ def ensure_loaded_message_table():
             CREATE TABLE IF NOT EXISTS loaded_message (
                 id                 INTEGER PRIMARY KEY DEFAULT 1,
                 userbot_message_id INTEGER,
-                file_type          TEXT,
-                caption            TEXT,
+                file_id            TEXT    NOT NULL DEFAULT '',
+                file_type          TEXT    NOT NULL DEFAULT 'photo',
+                caption            TEXT    NOT NULL DEFAULT '',
+                chat_id            BIGINT  NOT NULL DEFAULT 0,
+                message_id         BIGINT  NOT NULL DEFAULT 0,
                 updated_at         TIMESTAMPTZ DEFAULT NOW()
             )
         """)
         conn.commit()
 
-        # 기존 테이블에 컬럼 없을 경우 마이그레이션
+        # 기존 테이블 마이그레이션 (누락 컬럼 추가)
         columns_to_add = [
             ("userbot_message_id", "INTEGER"),
-            ("file_type",          "TEXT"),
-            ("caption",            "TEXT"),
+            ("file_id",            "TEXT NOT NULL DEFAULT ''"),
+            ("file_type",          "TEXT NOT NULL DEFAULT 'photo'"),
+            ("caption",            "TEXT NOT NULL DEFAULT ''"),
+            ("chat_id",            "BIGINT NOT NULL DEFAULT 0"),
+            ("message_id",         "BIGINT NOT NULL DEFAULT 0"),
             ("updated_at",         "TIMESTAMPTZ DEFAULT NOW()"),
         ]
         for col_name, col_type in columns_to_add:
@@ -600,6 +606,59 @@ def ensure_loaded_message_table():
         logger.info("ensure_loaded_message_table: OK")
     except Exception as e:
         logger.warning("ensure_loaded_message_table failed: %s", e)
+
+
+def get_loaded_message_full_pg() -> tuple[int, int, str, str, str] | None:
+    """(chat_id, message_id, file_id, file_type, caption) 반환. 없거나 file_id 없으면 None."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT chat_id, message_id, file_id, file_type, caption
+            FROM loaded_message WHERE id = 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row is None or not (row[2] or "").strip():
+            return None
+        return (int(row[0]), int(row[1]), row[2] or "", row[3] or "photo", row[4] or "")
+    except Exception as e:
+        logger.warning("get_loaded_message_full_pg failed: %s", e)
+        return None
+
+
+def set_loaded_message_pg(
+    chat_id: int,
+    message_id: int,
+    *,
+    file_id: str = "",
+    file_type: str = "photo",
+    caption: str = "",
+) -> bool:
+    """PG loaded_message 저장. 성공 True, 실패 False."""
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO loaded_message (id, chat_id, message_id, file_id, file_type, caption, updated_at)
+            VALUES (1, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (id) DO UPDATE
+                SET chat_id    = EXCLUDED.chat_id,
+                    message_id = EXCLUDED.message_id,
+                    file_id    = EXCLUDED.file_id,
+                    file_type  = EXCLUDED.file_type,
+                    caption    = EXCLUDED.caption,
+                    updated_at = NOW()
+        """, (chat_id, message_id, file_id, file_type, caption))
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("set_loaded_message_pg: OK (file_id=%s, type=%s)", file_id[:20], file_type)
+        return True
+    except Exception as e:
+        logger.warning("set_loaded_message_pg failed: %s", e)
+        return False
 
 
 def save_loaded_message(userbot_message_id: int, file_type: str, caption: str):

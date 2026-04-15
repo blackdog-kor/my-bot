@@ -109,8 +109,7 @@ async def main() -> None:
         UserNotParticipant,
         RPCError,
     )
-    from app.pg_broadcast import get_retry_targets, mark_retry_sent
-    from bot.handlers.callbacks import get_loaded_message_full
+    from app.pg_broadcast import get_retry_targets, mark_retry_sent, get_loaded_message_full_pg as get_loaded_message_full
 
     print("\n" + "=" * 62)
     print("   재발송 스크립트  (3일 경과 미클릭 유저)")

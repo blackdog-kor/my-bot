@@ -1,6 +1,6 @@
 """
 UserBot DM 캠페인 자동 실행 (통합 scripts/).
-장전된 메시지( data/users.db loaded_message )로 발송.
+장전된 메시지(PostgreSQL loaded_message)로 발송.
 실행: python scripts/dm_campaign_runner.py (또는 스케줄러 06:00)
 """
 from __future__ import annotations
@@ -20,8 +20,7 @@ load_dotenv(ROOT / ".env", override=True)
 load_dotenv(ROOT / "bot" / ".env", override=True)
 
 from app.userbot_sender import broadcast_via_userbot
-from app.pg_broadcast import get_campaign_stats
-from bot.handlers.callbacks import get_loaded_message_full
+from app.pg_broadcast import get_campaign_stats, get_loaded_message_full_pg as get_loaded_message_full
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
