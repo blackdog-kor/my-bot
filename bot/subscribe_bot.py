@@ -116,18 +116,61 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as e:
         logger.warning("subscribe_bot: save user failed: %s", e)
 
-    # affiliate_url: DB(campaign_config) 우선, DB 실패 시 환경변수 폴백
+    # campaign_config 로드 (DB 우선, 실패 시 환경변수 폴백)
     try:
         from app.pg_broadcast import get_campaign_config
         cfg = get_campaign_config()
-        button_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
     except Exception as _e:
-        logger.warning("subscribe_bot: get_campaign_config 실패, 환경변수 폴백: %s", _e)
-        button_url = AFFILIATE_URL
+        logger.warning("subscribe_bot: get_campaign_config 실패: %s", _e)
+        cfg = {}
+
+    button_url  = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
+    promo_code  = (cfg.get("promo_code") or "").strip()
+    caption_tmpl = (cfg.get("caption_template") or "").strip()
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("🎰 지금 바로 입장하기", url=button_url)
     ]])
+
+    # loaded_message에서 미디어 읽기
+    loaded = get_loaded_message_full()
+    if loaded:
+        _, _, file_id, file_type, loaded_caption = loaded
+        if file_id:
+            # 캡션 조합: DB 템플릿 우선, 없으면 장전 캡션
+            base_caption = caption_tmpl or loaded_caption
+            if promo_code and "{promo_code}" in base_caption:
+                base_caption = base_caption.replace("{promo_code}", promo_code)
+            if button_url and button_url not in base_caption:
+                base_caption = f"{base_caption}\n{button_url}" if base_caption else button_url
+
+            try:
+                if file_type == "photo":
+                    await update.message.reply_photo(
+                        file_id, caption=base_caption or None,
+                        reply_markup=keyboard, parse_mode="HTML",
+                    )
+                elif file_type == "video":
+                    try:
+                        await update.message.reply_video(
+                            file_id, caption=base_caption or None,
+                            reply_markup=keyboard, parse_mode="HTML",
+                        )
+                    except Exception:
+                        await update.message.reply_document(
+                            file_id, caption=base_caption or None,
+                            reply_markup=keyboard, parse_mode="HTML",
+                        )
+                else:
+                    await update.message.reply_document(
+                        file_id, caption=base_caption or None,
+                        reply_markup=keyboard, parse_mode="HTML",
+                    )
+                return
+            except Exception as e:
+                logger.warning("subscribe_bot: 미디어 전송 실패, 텍스트 폴백: %s", e)
+
+    # 미디어 없거나 전송 실패 시 텍스트 폴백
     await update.message.reply_text(
         "🎉 <b>환영합니다!</b>\n\n"
         "최신 이벤트와 특별 혜택 정보를 가장 먼저 받아보세요.\n\n"
