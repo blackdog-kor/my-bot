@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler
 
 sys.path.insert(0, "/app")
 
@@ -20,11 +20,7 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT / "bot" / ".env")
 
-from bot.handlers.callbacks import (
-    admin_command,
-    admin_load_message_handler,
-    callback,
-)
+from bot.handlers.callbacks import admin_command, start_command
 
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 
@@ -51,14 +47,8 @@ def build_application() -> Application:
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN이 설정되지 않았습니다.")
     _application = Application.builder().token(BOT_TOKEN).build()
+    _application.add_handler(CommandHandler("start", start_command))
     _application.add_handler(CommandHandler("admin", admin_command))
-    _application.add_handler(CallbackQueryHandler(callback))
-    _application.add_handler(
-        MessageHandler(
-            filters.PHOTO | filters.VIDEO | filters.Document.ALL,
-            admin_load_message_handler,
-        )
-    )
     return _application
 
 

@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
-load_dotenv(ROOT / ".env")
-load_dotenv(ROOT / "bot" / ".env")
+load_dotenv(ROOT / ".env", override=True)
+load_dotenv(ROOT / "bot" / ".env", override=True)
 
 import httpx
 from bs4 import BeautifulSoup

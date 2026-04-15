@@ -14,10 +14,10 @@ import httpx
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / ".env")
-load_dotenv(ROOT / "bot" / ".env")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+load_dotenv(ROOT / ".env", override=True)
+load_dotenv(ROOT / "bot" / ".env", override=True)
 
 from app.userbot_sender import broadcast_via_userbot
 from app.pg_broadcast import get_campaign_stats
