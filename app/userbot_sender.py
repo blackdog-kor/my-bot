@@ -31,12 +31,13 @@ logger = logging.getLogger(__name__)
 API_ID   = int((os.getenv("API_ID")   or "0").strip())
 API_HASH = (os.getenv("API_HASH") or "").strip()
 
-USER_DELAY_MIN   = float(os.getenv("USER_DELAY_MIN",   "3"))
-USER_DELAY_MAX   = float(os.getenv("USER_DELAY_MAX",   "7"))
-LONG_BREAK_EVERY = int(  os.getenv("LONG_BREAK_EVERY", "50"))
-LONG_BREAK_MIN   = float(os.getenv("LONG_BREAK_MIN",   "300"))
-LONG_BREAK_MAX   = float(os.getenv("LONG_BREAK_MAX",   "600"))
-BATCH_SIZE       = int(  os.getenv("BATCH_SIZE",        "50"))
+USER_DELAY_MIN         = float(os.getenv("USER_DELAY_MIN",          "15"))
+USER_DELAY_MAX         = float(os.getenv("USER_DELAY_MAX",          "45"))
+LONG_BREAK_EVERY       = int(  os.getenv("LONG_BREAK_EVERY",        "50"))
+LONG_BREAK_MIN         = float(os.getenv("LONG_BREAK_MIN",          "300"))
+LONG_BREAK_MAX         = float(os.getenv("LONG_BREAK_MAX",          "600"))
+BATCH_SIZE             = int(  os.getenv("BATCH_SIZE",               "50"))
+DAILY_LIMIT_PER_ACCOUNT = int( os.getenv("DAILY_LIMIT_PER_ACCOUNT", "100"))
 
 VIP_URL             = (os.getenv("VIP_URL") or "https://1wwtgq.com/?p=mskf").strip()
 AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "").strip()  # campaign_config 폴백 전용
@@ -227,6 +228,7 @@ async def broadcast_via_userbot(
                 "client":         client_obj,
                 "cooldown_until": 0.0,
                 "cached_file_id": None,   # 첫 발송 성공 후 Telegram file_id 캐시
+                "daily_sent":     0,      # 당일 발송 건수
             }
             all_started.append(acc_entry)
 
@@ -414,6 +416,13 @@ async def broadcast_via_userbot(
                         )
                         continue
 
+                    if acc["daily_sent"] >= DAILY_LIMIT_PER_ACCOUNT:
+                        logger.info(
+                            "%s 일일 한도 도달 (%d/%d) — 건너뜀",
+                            acc["label"], acc["daily_sent"], DAILY_LIMIT_PER_ACCOUNT,
+                        )
+                        continue
+
                     client: Client = acc["client"]
 
                     # ── Step A: @username → user.id 해석 ────────────────────
@@ -454,13 +463,15 @@ async def broadcast_via_userbot(
                     try:
                         await _send_to_user(acc, target, user_caption)
                         sent += 1
+                        acc["daily_sent"] += 1
                         delivered = True
                         batch_done.append(uid)
                         logger.info(
                             "✅ 발송 성공: %s (user_id=%s, db_uid=%s, 계정=%s, "
-                            "누적 sent=%d / skip=%d / fail=%d)",
+                            "누적 sent=%d / skip=%d / fail=%d, 계정일일=%d/%d)",
                             target, user_id, uid, acc["label"],
                             sent, skipped, failed,
+                            acc["daily_sent"], DAILY_LIMIT_PER_ACCOUNT,
                         )
 
                     except FloodWait as e:
@@ -490,6 +501,17 @@ async def broadcast_via_userbot(
                         batch_done.append(uid)
 
                 if not delivered:
+                    # 전 계정이 한도 초과인지 확인
+                    all_maxed = all(
+                        a["daily_sent"] >= DAILY_LIMIT_PER_ACCOUNT for a in accounts
+                    )
+                    if all_maxed:
+                        await _notify(
+                            f"🛑 전 계정 일일 한도 도달 ({DAILY_LIMIT_PER_ACCOUNT}건/계정) — 발송 중단"
+                        )
+                        batch_done.append(uid)
+                        break
+
                     # 전 계정 쿨다운 → 가장 빠른 해제까지 대기 후 failed 처리
                     next_ready = min(
                         float(a.get("cooldown_until") or 0.0) for a in accounts
@@ -526,6 +548,10 @@ async def broadcast_via_userbot(
                 )
                 if remaining == 0:
                     break
+
+            # 전 계정 일일 한도 초과 시 발송 중단
+            if all(a["daily_sent"] >= DAILY_LIMIT_PER_ACCOUNT for a in accounts):
+                break
 
     finally:
         # 시작된 모든 클라이언트 종료 (성공/실패 무관)
