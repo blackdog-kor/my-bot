@@ -707,6 +707,9 @@ def get_loaded_message():
 # campaign_config 테이블
 # ─────────────────────────────────────────────
 
+_SUBSCRIBE_BOT_LINK_DEFAULT = "t.me/blackdog_eve_casino_bot"
+
+
 def ensure_campaign_config_table():
     """campaign_config 테이블 생성 + 기본 행(id=1) 보장."""
     try:
@@ -714,11 +717,12 @@ def ensure_campaign_config_table():
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS campaign_config (
-                id               INTEGER PRIMARY KEY DEFAULT 1,
-                affiliate_url    TEXT NOT NULL DEFAULT '',
-                promo_code       TEXT NOT NULL DEFAULT '',
-                caption_template TEXT NOT NULL DEFAULT '',
-                updated_at       TIMESTAMPTZ DEFAULT NOW(),
+                id                 INTEGER PRIMARY KEY DEFAULT 1,
+                affiliate_url      TEXT NOT NULL DEFAULT '',
+                promo_code         TEXT NOT NULL DEFAULT '',
+                caption_template   TEXT NOT NULL DEFAULT '',
+                subscribe_bot_link TEXT NOT NULL DEFAULT 't.me/blackdog_eve_casino_bot',
+                updated_at         TIMESTAMPTZ DEFAULT NOW(),
                 CHECK (id = 1)
             )
         """)
@@ -727,6 +731,15 @@ def ensure_campaign_config_table():
             ON CONFLICT (id) DO NOTHING
         """)
         conn.commit()
+        # 기존 테이블에 subscribe_bot_link 컬럼 없으면 추가
+        try:
+            cur.execute(
+                "ALTER TABLE campaign_config ADD COLUMN subscribe_bot_link "
+                "TEXT NOT NULL DEFAULT 't.me/blackdog_eve_casino_bot'"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
         cur.close()
         conn.close()
         logger.info("ensure_campaign_config_table: OK")
@@ -742,7 +755,7 @@ def get_campaign_config() -> dict:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            SELECT affiliate_url, promo_code, caption_template, updated_at
+            SELECT affiliate_url, promo_code, caption_template, subscribe_bot_link, updated_at
             FROM campaign_config WHERE id = 1
         """)
         row = cur.fetchone()
@@ -750,23 +763,27 @@ def get_campaign_config() -> dict:
         conn.close()
         if row:
             return {
-                "affiliate_url":    row[0] or "",
-                "promo_code":       row[1] or "",
-                "caption_template": row[2] or "",
-                "updated_at":       row[3],
+                "affiliate_url":      row[0] or "",
+                "promo_code":         row[1] or "",
+                "caption_template":   row[2] or "",
+                "subscribe_bot_link": row[3] or _SUBSCRIBE_BOT_LINK_DEFAULT,
+                "updated_at":         row[4],
             }
     except Exception as e:
         logger.warning("get_campaign_config failed: %s", e)
-    return {"affiliate_url": "", "promo_code": "", "caption_template": "", "updated_at": None}
+    return {
+        "affiliate_url": "", "promo_code": "", "caption_template": "",
+        "subscribe_bot_link": _SUBSCRIBE_BOT_LINK_DEFAULT, "updated_at": None,
+    }
 
 
 def update_campaign_config(field: str, value: str) -> bool:
     """campaign_config의 단일 필드를 업데이트한다.
 
-    허용 필드: affiliate_url, promo_code, caption_template
+    허용 필드: affiliate_url, promo_code, caption_template, subscribe_bot_link
     SQL injection 방지: 허용 목록 검증 후 f-string 사용 (값은 파라미터 바인딩).
     """
-    _ALLOWED = {"affiliate_url", "promo_code", "caption_template"}
+    _ALLOWED = {"affiliate_url", "promo_code", "caption_template", "subscribe_bot_link"}
     if field not in _ALLOWED:
         logger.warning("update_campaign_config: 허용되지 않은 필드 %r", field)
         return False

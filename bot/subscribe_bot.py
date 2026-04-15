@@ -54,20 +54,22 @@ CB_STATUS         = "sub_status"
 CB_CONFIRM        = "sub_confirm_send"
 CB_CANCEL         = "sub_confirm_cancel"
 # 설정 관리
-CB_CONFIG         = "sub_config"
-CB_CONFIG_URL     = "sub_cfg_url"
-CB_CONFIG_PROMO   = "sub_cfg_promo"
-CB_CONFIG_CAPTION = "sub_cfg_cap"
-CB_CONFIG_VIEW    = "sub_cfg_view"
+CB_CONFIG          = "sub_config"
+CB_CONFIG_URL      = "sub_cfg_url"
+CB_CONFIG_PROMO    = "sub_cfg_promo"
+CB_CONFIG_CAPTION  = "sub_cfg_cap"
+CB_CONFIG_VIEW     = "sub_cfg_view"
+CB_CONFIG_BOT_LINK = "sub_cfg_bot_link"
 
 # context.user_data 키: 텍스트 입력 대기 중인 필드명
 _AWAITING_KEY = "sub_awaiting"
 
 # 입력 대기 필드 → 표시 이름 매핑
 _FIELD_LABELS: dict[str, str] = {
-    "affiliate_url":    "어필리에이트 링크",
-    "promo_code":       "프로모코드",
-    "caption_template": "캡션 템플릿",
+    "affiliate_url":      "어필리에이트 링크",
+    "promo_code":         "프로모코드",
+    "caption_template":   "캡션 템플릿",
+    "subscribe_bot_link": "봇 링크",
 }
 
 
@@ -91,6 +93,7 @@ def _config_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔗 링크 변경",        callback_data=CB_CONFIG_URL)],
         [InlineKeyboardButton("🎟 프로모코드 변경",   callback_data=CB_CONFIG_PROMO)],
         [InlineKeyboardButton("📝 캡션 수정",         callback_data=CB_CONFIG_CAPTION)],
+        [InlineKeyboardButton("🤖 봇 링크 변경",      callback_data=CB_CONFIG_BOT_LINK)],
         [InlineKeyboardButton("👁 현재 설정 확인",    callback_data=CB_CONFIG_VIEW)],
         [InlineKeyboardButton("🏠 메인 메뉴",         callback_data=CB_HOME)],
     ])
@@ -418,13 +421,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         try:
             from app.pg_broadcast import get_campaign_config
             cfg = get_campaign_config()
-            url  = cfg.get("affiliate_url")  or "(미설정 — 환경변수 폴백)"
-            promo = cfg.get("promo_code")    or "(미설정)"
-            tmpl  = cfg.get("caption_template") or "(미설정 — 장전 캡션 사용)"
-            updated = cfg.get("updated_at")
+            url      = cfg.get("affiliate_url")      or "(미설정 — 환경변수 폴백)"
+            promo    = cfg.get("promo_code")          or "(미설정)"
+            tmpl     = cfg.get("caption_template")    or "(미설정 — 장전 캡션 사용)"
+            bot_link = cfg.get("subscribe_bot_link")  or "(미설정)"
+            updated  = cfg.get("updated_at")
             updated_str = str(updated)[:19] if updated else "없음"
         except Exception as e:
-            url = promo = tmpl = f"오류: {e}"
+            url = promo = tmpl = bot_link = f"오류: {e}"
             updated_str = "-"
 
         url_preview  = url[:60]   + "..." if len(str(url))  > 60  else url
@@ -434,9 +438,21 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"👁 <b>현재 캠페인 설정</b>\n\n"
             f"🔗 링크: <code>{url_preview}</code>\n"
             f"🎟 프로모코드: <code>{promo}</code>\n"
-            f"📝 캡션: <code>{tmpl_preview}</code>\n\n"
+            f"📝 캡션: <code>{tmpl_preview}</code>\n"
+            f"🤖 봇 링크: <code>{bot_link}</code>\n\n"
             f"🕐 마지막 수정: {updated_str}",
             reply_markup=_config_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    if data == CB_CONFIG_BOT_LINK:
+        if not admin:
+            return
+        context.user_data[_AWAITING_KEY] = "subscribe_bot_link"
+        await query.message.reply_text(
+            "🤖 새 <b>봇 링크</b>를 입력해주세요.\n\n"
+            "예: <code>t.me/blackdog_eve_casino_bot</code>",
             parse_mode="HTML",
         )
         return
