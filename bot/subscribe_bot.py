@@ -43,6 +43,8 @@ SUBSCRIBE_BOT_TOKEN = (os.getenv("SUBSCRIBE_BOT_TOKEN") or "").strip()
 AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "https://t.me").strip()  # campaign_config 폴백 전용
 ADMIN_ID_RAW        = (os.getenv("ADMIN_ID") or "").strip()
 ADMIN_ID            = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+CHANNEL_ID_RAW      = (os.getenv("CHANNEL_ID") or "").strip()
+CHANNEL_ID          = int(CHANNEL_ID_RAW) if CHANNEL_ID_RAW.lstrip("-").isdigit() else 0
 
 # ── 콜백 데이터 (sub_ 접두사로 admin bot 콜백과 구분) ──────────────────────
 CB_HOME           = "sub_home"
@@ -504,6 +506,68 @@ async def _do_push(bot, admin_chat_id: int) -> None:
     )
 
 
+async def _forward_channel_post(bot, from_chat_id: int, message_id: int) -> None:
+    """채널 게시물을 구독자 전체에 copy_message로 전송 (인라인 버튼 포함)."""
+    try:
+        from app.pg_broadcast import get_subscribe_users, get_campaign_config
+        users = get_subscribe_users()
+        cfg = get_campaign_config()
+    except Exception as e:
+        logger.warning("channel forward: 구독자/설정 조회 실패: %s", e)
+        return
+
+    if not users:
+        return
+
+    button_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎰 Join VIP Now", url=button_url)
+    ]])
+
+    sent = skipped = failed = 0
+    for uid, _ in users:
+        try:
+            await bot.copy_message(
+                chat_id=uid,
+                from_chat_id=from_chat_id,
+                message_id=message_id,
+                reply_markup=keyboard,
+            )
+            sent += 1
+        except Exception as e:
+            err = str(e).lower()
+            if any(k in err for k in ("blocked", "deactivated", "not found", "forbidden", "user is deactivated")):
+                skipped += 1
+            else:
+                failed += 1
+                logger.warning("channel forward failed to %d: %s", uid, e)
+        await asyncio.sleep(0.05)  # ~20 msg/sec
+
+    summary = (
+        f"📢 채널 포워딩 완료\n"
+        f"• 성공: {sent}명\n"
+        f"• 차단/탈퇴: {skipped}명\n"
+        f"• 실패: {failed}명"
+    )
+    logger.info(summary)
+    if ADMIN_ID:
+        try:
+            await bot.send_message(ADMIN_ID, summary)
+        except Exception:
+            pass
+
+
+async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """채널 게시물 수신 → 구독자 전체 포워딩 (백그라운드 실행)."""
+    msg = update.channel_post
+    if not msg:
+        return
+    logger.info("채널 게시물 수신 (chat_id=%s, message_id=%s) → 포워딩 시작", msg.chat_id, msg.message_id)
+    asyncio.create_task(
+        _forward_channel_post(context.bot, msg.chat_id, msg.message_id)
+    )
+
+
 async def _send_media(bot, chat_id: int, file_id: str, file_type: str, caption: str) -> None:
     cap = caption or None
     if file_type == "photo":
@@ -538,6 +602,17 @@ def build_application() -> Application:
             admin_load_handler,
         )
     )
+    # 채널 게시물 자동 포워딩 (CHANNEL_ID 설정된 경우에만)
+    if CHANNEL_ID:
+        app.add_handler(
+            MessageHandler(
+                filters.UpdateType.CHANNEL_POSTS & filters.Chat(CHANNEL_ID),
+                channel_post_handler,
+            )
+        )
+        logger.info("채널 포워딩 핸들러 등록: CHANNEL_ID=%s", CHANNEL_ID)
+    else:
+        logger.info("CHANNEL_ID 미설정 — 채널 포워딩 비활성화")
     return app
 
 
