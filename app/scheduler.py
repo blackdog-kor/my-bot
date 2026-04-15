@@ -116,6 +116,13 @@ def _job_subscribe_push() -> None:
         _notify("⏰ 구독봇 자동 푸시 Job 완료" if ok else "⏰ 구독봇 자동 푸시 Job 실패")
 
 
+def _job_warmup() -> None:
+    with _job_lock:
+        _notify("🏋️ 워밍업 Job 시작 (08:00 KST)")
+        ok = _run_script("warmup.py", "워밍업(warmup)")
+        _notify("🏋️ 워밍업 Job 완료" if ok else "🏋️ 워밍업 Job 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -148,6 +155,12 @@ def run_scheduler_forever() -> None:
         trigger=CronTrigger(hour=0, minute=0),
         id="subscribe_push",
     )
+    # 23:00 UTC (08:00 KST) — 세션 계정 워밍업 (warmup)
+    scheduler.add_job(
+        _job_warmup,
+        trigger=CronTrigger(hour=23, minute=0),
+        id="warmup",
+    )
     scheduler.start()
 
     # 다음 예약 Job 목록 로그
@@ -155,7 +168,7 @@ def run_scheduler_forever() -> None:
     for j in jobs:
         logger.info("다음 예약: %s — %s", j.id, j.next_run_time)
     print(
-        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / 발송 06:00 / 재발송 12:00 / 구독봇 푸시 00:00(UTC=09KST) ---",
+        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / 발송 06:00 / 재발송 12:00 / 구독봇 푸시 00:00(UTC=09KST) / 워밍업 23:00(UTC=08KST) ---",
         flush=True,
     )
 
