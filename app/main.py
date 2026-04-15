@@ -110,6 +110,12 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/version")
+def version():
+    from app import __version__
+    return {"version": __version__}
+
+
 @app.get("/debug/routes")
 def debug_routes():
     """현재 FastAPI에 등록된 모든 라우트 목록 반환 — 엔드포인트 존재 여부 확인용."""

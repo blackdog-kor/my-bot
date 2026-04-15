@@ -3,6 +3,7 @@ Admin Bot 진입점.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import os
@@ -63,6 +64,14 @@ async def run_bot() -> None:
 
 
 def main() -> None:
+    from app import __version__
+
+    parser = argparse.ArgumentParser(description="Telegram Admin Bot")
+    parser.add_argument(
+        "--version", action="version", version=f"my-bot {__version__}"
+    )
+    parser.parse_args()
+
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN이 설정되지 않았습니다.")
         return
