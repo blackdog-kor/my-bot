@@ -137,12 +137,12 @@ def run_scheduler_forever() -> None:
         trigger=CronTrigger(hour=0, minute=0),
         id="member_scraper",
     )
-    # 06:00 — 1차 DM 발송 (dm_campaign_runner)
-    scheduler.add_job(
-        _job_dm_campaign,
-        trigger=CronTrigger(hour=6, minute=0),
-        id="dm_campaign_runner",
-    )
+    # 06:00 — 1차 DM 발송 (dm_campaign_runner) ← 워밍업 완료 전까지 비활성화
+    # scheduler.add_job(
+    #     _job_dm_campaign,
+    #     trigger=CronTrigger(hour=6, minute=0),
+    #     id="dm_campaign_runner",
+    # )
     # 12:00 — 3일 경과 미클릭 재발송 (retry_sender)
     scheduler.add_job(
         _job_retry_sender,
@@ -168,7 +168,7 @@ def run_scheduler_forever() -> None:
     for j in jobs:
         logger.info("다음 예약: %s — %s", j.id, j.next_run_time)
     print(
-        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / 발송 06:00 / 재발송 12:00 / 구독봇 푸시 00:00(UTC=09KST) / 워밍업 23:00(UTC=08KST) ---",
+        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / [발송 비활성화] / 재발송 12:00 / 구독봇 푸시 00:00(UTC=09KST) / 워밍업 23:00(UTC=08KST) ---",
         flush=True,
     )
 
