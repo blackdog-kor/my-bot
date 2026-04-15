@@ -389,11 +389,7 @@ async def broadcast_via_userbot(
                 else:
                     user_caption = effective_caption
 
-                # affiliate_url 자동 추가 (미포함 시 caption 끝에 줄바꿈 후 추가)
-                if effective_affiliate_url and effective_affiliate_url not in user_caption:
-                    user_caption = f"{user_caption}\n{effective_affiliate_url}"
-
-                # 구독봇 링크 추가 (AFFILIATE_URL 아래 줄)
+                # 구독봇 링크 추가
                 _sub_line = "👉 VIP 채널 구독하기\nt.me/blackdog_eve_casino_bot"
                 if _sub_line not in user_caption:
                     user_caption = f"{user_caption}\n{_sub_line}"

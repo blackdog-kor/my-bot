@@ -84,8 +84,6 @@ async def main() -> None:
     base_caption = _db_caption_tmpl or loaded_caption
     if _db_promo_code and "{promo_code}" in base_caption:
         base_caption = base_caption.replace("{promo_code}", _db_promo_code)
-    if effective_affiliate_url and effective_affiliate_url not in base_caption:
-        base_caption = f"{base_caption}\n{effective_affiliate_url}"
 
     # 구독자 목록 (id + username)
     users = get_subscribe_users()

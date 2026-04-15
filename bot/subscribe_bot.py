@@ -129,7 +129,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     caption_tmpl = (cfg.get("caption_template") or "").strip()
 
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎰 지금 바로 입장하기", url=button_url)
+        InlineKeyboardButton("🎰 Join VIP Now", url=button_url)
     ]])
 
     # loaded_message에서 미디어 읽기
@@ -141,8 +141,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             base_caption = caption_tmpl or loaded_caption
             if promo_code and "{promo_code}" in base_caption:
                 base_caption = base_caption.replace("{promo_code}", promo_code)
-            if button_url and button_url not in base_caption:
-                base_caption = f"{base_caption}\n{button_url}" if base_caption else button_url
 
             try:
                 if file_type == "photo":
@@ -482,8 +480,6 @@ async def _do_push(bot, admin_chat_id: int) -> None:
     base_caption = _db_caption_tmpl or loaded_caption
     if _db_promo_code and "{promo_code}" in base_caption:
         base_caption = base_caption.replace("{promo_code}", _db_promo_code)
-    if effective_affiliate_url and effective_affiliate_url not in base_caption:
-        base_caption = f"{base_caption}\n{effective_affiliate_url}"
 
     from app.userbot_sender import personalize_caption
 
