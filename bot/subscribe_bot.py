@@ -52,7 +52,6 @@ CB_POST_DELETE  = "sub_post_delete"
 # 설정 관리
 CB_CONFIG          = "sub_config"
 CB_CONFIG_URL      = "sub_cfg_url"
-CB_CONFIG_PROMO    = "sub_cfg_promo"
 CB_CONFIG_CAPTION  = "sub_cfg_cap"
 CB_CONFIG_VIEW     = "sub_cfg_view"
 CB_CONFIG_BOT_LINK = "sub_cfg_bot_link"
@@ -64,7 +63,6 @@ _AWAITING_KEY = "sub_awaiting"
 # 입력 대기 필드 → 표시 이름 매핑
 _FIELD_LABELS: dict[str, str] = {
     "affiliate_url":      "어필리에이트 링크",
-    "promo_code":         "프로모코드",
     "caption_template":   "캡션 템플릿",
     "subscribe_bot_link": "봇 링크",
     "button_text":        "DM 버튼 텍스트",
@@ -91,7 +89,6 @@ def _admin_keyboard() -> InlineKeyboardMarkup:
 def _config_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔗 링크 변경",       callback_data=CB_CONFIG_URL)],
-        [InlineKeyboardButton("🎟 프로모코드 변경",  callback_data=CB_CONFIG_PROMO)],
         [InlineKeyboardButton("📝 캡션 수정",        callback_data=CB_CONFIG_CAPTION)],
         [InlineKeyboardButton("🤖 봇 링크 변경",        callback_data=CB_CONFIG_BOT_LINK)],
         [InlineKeyboardButton("🔘 DM 버튼 텍스트 변경", callback_data=CB_CONFIG_BTN_TEXT)],
@@ -142,11 +139,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         cfg = {}
 
     button_url   = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
-    promo_code   = (cfg.get("promo_code") or "").strip()
     caption_tmpl = (cfg.get("caption_template") or "").strip()
+    btn_text     = (cfg.get("button_text") or "🎰 VIP 카지노 입장").strip()
 
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎰 Join VIP Now", url=button_url)
+        InlineKeyboardButton(btn_text, url=button_url)
     ]])
 
     # campaign_posts에서 현재 게시물 읽기 (last_sent_at 갱신 없음)
@@ -162,8 +159,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         file_type    = post["file_type"]
         post_cap     = post["caption"] or ""
         base_caption = caption_tmpl or post_cap
-        if promo_code and "{promo_code}" in base_caption:
-            base_caption = base_caption.replace("{promo_code}", promo_code)
         try:
             if file_type == "photo":
                 await update.message.reply_photo(
@@ -491,24 +486,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    if data == CB_CONFIG_PROMO:
-        if not admin:
-            return
-        context.user_data[_AWAITING_KEY] = "promo_code"
-        await query.message.reply_text(
-            "🎟 새 <b>프로모코드</b>를 입력해주세요.\n\n"
-            "캡션 템플릿에서 <code>{promo_code}</code>로 자동 치환됩니다.",
-            parse_mode="HTML",
-        )
-        return
-
     if data == CB_CONFIG_CAPTION:
         if not admin:
             return
         context.user_data[_AWAITING_KEY] = "caption_template"
         await query.message.reply_text(
             "📝 새 <b>캡션 템플릿</b>을 입력해주세요.\n\n"
-            "• <code>{promo_code}</code> 자리표시자 사용 가능\n"
             "• 비워두면 게시물 원본 캡션이 사용됩니다.",
             parse_mode="HTML",
         )
@@ -521,14 +504,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             from app.pg_broadcast import get_campaign_config
             cfg      = get_campaign_config()
             url      = cfg.get("affiliate_url")     or "(미설정 — 환경변수 폴백)"
-            promo    = cfg.get("promo_code")         or "(미설정)"
             tmpl     = cfg.get("caption_template")   or "(미설정 — 게시물 캡션 사용)"
             bot_link = cfg.get("subscribe_bot_link") or "(미설정)"
             btn_text = cfg.get("button_text")        or "🎰 VIP 카지노 입장"
             updated  = cfg.get("updated_at")
             updated_str = str(updated)[:19] if updated else "없음"
         except Exception as e:
-            url = promo = tmpl = bot_link = btn_text = f"오류: {e}"
+            url = tmpl = bot_link = btn_text = f"오류: {e}"
             updated_str = "-"
 
         url_preview  = url[:60]   + "..." if len(str(url))  > 60  else url
@@ -537,7 +519,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.message.reply_text(
             f"👁 <b>현재 캠페인 설정</b>\n\n"
             f"🔗 링크: <code>{url_preview}</code>\n"
-            f"🎟 프로모코드: <code>{promo}</code>\n"
             f"📝 캡션: <code>{tmpl_preview}</code>\n"
             f"🤖 봇 링크: <code>{bot_link}</code>\n"
             f"🔘 DM 버튼 텍스트: <code>{btn_text}</code>\n\n"
@@ -610,11 +591,8 @@ async def _do_push(bot, admin_chat_id: int) -> None:
 
     effective_affiliate_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
     _db_caption_tmpl        = (cfg.get("caption_template") or "").strip()
-    _db_promo_code          = (cfg.get("promo_code") or "").strip()
 
     base_caption = _db_caption_tmpl or post_cap
-    if _db_promo_code and "{promo_code}" in base_caption:
-        base_caption = base_caption.replace("{promo_code}", _db_promo_code)
 
     from app.userbot_sender import personalize_caption
 

@@ -800,7 +800,7 @@ def update_campaign_config(field: str, value: str) -> bool:
     허용 필드: affiliate_url, promo_code, caption_template, subscribe_bot_link
     SQL injection 방지: 허용 목록 검증 후 f-string 사용 (값은 파라미터 바인딩).
     """
-    _ALLOWED = {"affiliate_url", "promo_code", "caption_template", "subscribe_bot_link", "button_text"}
+    _ALLOWED = {"affiliate_url", "caption_template", "subscribe_bot_link", "button_text"}
     if field not in _ALLOWED:
         logger.warning("update_campaign_config: 허용되지 않은 필드 %r", field)
         return False
