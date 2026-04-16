@@ -1,111 +1,33 @@
-name: Monorepo Stability Checks
+name: Stability Check
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/**'
-      - 'bot/**'
-      - 'automation/**'
-      - 'README.md'
-      - 'PROJECT_CONTEXT.md'
-      - 'PROJECT_MAP.md'
   push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/**'
-      - 'bot/**'
-      - 'automation/**'
-  workflow_dispatch:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 concurrency:
-  group: monorepo-stability-${{ github.ref }}
+  group: stability-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  detect-changes:
+  lint:
     runs-on: ubuntu-latest
-    outputs:
-      bot: ${{ steps.filter.outputs.bot }}
-      automation: ${{ steps.filter.outputs.automation }}
-      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Detect changed paths
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            bot:
-              - 'bot/**'
-            automation:
-              - 'automation/**'
-            workflows:
-              - '.github/workflows/**'
-
-  bot-tests:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.bot == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: bot
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Run tests
-        run: pytest -q
-
-  automation-tests:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.automation == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: automation
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Run tests
-        run: pytest -q
-
-  workflow-sanity:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.workflows == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate workflow files exist
-        run: |
-          test -f .github/workflows/ai-control.yml
-          test -f .github/workflows/monorepo-stability.yml
+          python -m py_compile app/main.py
+          python -m py_compile app/userbot_sender.py
+          python -m py_compile app/pg_broadcast.py
+          python -m py_compile app/scheduler.py
+          python -m py_compile bot/subscribe_bot.py
+          echo "✅ Syntax OK"

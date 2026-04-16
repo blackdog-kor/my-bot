@@ -210,3 +210,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Autopus-ADK (로컬 바이너리만 사용, 저장소에 포함 안 함)
+autopus.yaml
+.autopus/
+AGENTS.md
+GEMINI.md
