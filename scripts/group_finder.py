@@ -34,7 +34,7 @@ ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 MAX_GROUPS_PER_RUN      = int(os.getenv("MAX_GROUPS_PER_RUN",      "20"))
 MAX_RESULTS_PER_KEYWORD = int(os.getenv("MAX_RESULTS_PER_KEYWORD", "50"))
 KEYWORD_DELAY_SEC       = float(os.getenv("KEYWORD_DELAY_SEC",     "5.0"))
-MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
+MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "500"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
@@ -91,19 +91,30 @@ async def search_groups_by_keyword(
 
     results: list[dict] = []
     valid_types = {ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL}
+    raw_seen = 0
+    filtered_no_username = 0
+    filtered_type = 0
+    filtered_members = 0
 
     try:
         count = 0
         async for message in client.search_global(keyword, limit=max_per_keyword):
+            raw_seen += 1
             chat = message.chat
-            if not chat or not chat.username:
+            if not chat:
+                continue
+            if not chat.username:
+                filtered_no_username += 1
                 continue
             if chat.type not in valid_types:
+                filtered_type += 1
                 continue
             if chat.id in seen_ids:
                 continue
+            # search_global의 경량 chat 객체는 members_count=0 반환 → 0이면 알 수 없음으로 간주해 통과
             member_count = getattr(chat, "members_count", 0) or 0
-            if member_count < min_members:
+            if member_count > 0 and member_count < min_members:
+                filtered_members += 1
                 continue
             seen_ids.add(chat.id)
             results.append({
@@ -116,6 +127,11 @@ async def search_groups_by_keyword(
             if count >= max_per_keyword:
                 break
 
+        print(
+            f"    🔎 raw={raw_seen} / no_username={filtered_no_username} "
+            f"/ wrong_type={filtered_type} / low_members={filtered_members} "
+            f"/ 통과={len(results)}"
+        )
     except FloodWait as e:
         wait = int(e.value or 30) + 5
         print(f"    ⏳ search_global FloodWait {wait}초 대기...")
