@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import random
@@ -77,6 +78,46 @@ async def personalize_caption(caption: str, username: str) -> str:
         return caption
 
 
+# ── caption_entities JSON → Pyrogram MessageEntity 변환 ──────────────────────
+def _parse_pyrogram_entities(entities_json: str | None):
+    if not entities_json:
+        return None
+    try:
+        from pyrogram.types import MessageEntity
+        from pyrogram.enums import MessageEntityType
+        _TYPE_MAP = {
+            "bold":          MessageEntityType.BOLD,
+            "italic":        MessageEntityType.ITALIC,
+            "underline":     MessageEntityType.UNDERLINE,
+            "strikethrough": MessageEntityType.STRIKETHROUGH,
+            "spoiler":       MessageEntityType.SPOILER,
+            "code":          MessageEntityType.CODE,
+            "pre":           MessageEntityType.PRE,
+            "text_link":     MessageEntityType.TEXT_LINK,
+            "mention":       MessageEntityType.MENTION,
+            "hashtag":       MessageEntityType.HASHTAG,
+            "url":           MessageEntityType.URL,
+            "custom_emoji":  MessageEntityType.CUSTOM_EMOJI,
+        }
+        result = []
+        for e in json.loads(entities_json):
+            t = _TYPE_MAP.get(e.get("type", ""))
+            if t is None:
+                continue
+            kwargs: dict = {"type": t, "offset": e["offset"], "length": e["length"]}
+            if e.get("url"):
+                kwargs["url"] = e["url"]
+            if e.get("custom_emoji_id"):
+                kwargs["custom_emoji_id"] = e["custom_emoji_id"]
+            if e.get("language"):
+                kwargs["language"] = e["language"]
+            result.append(MessageEntity(**kwargs))
+        return result or None
+    except Exception as ex:
+        logger.warning("_parse_pyrogram_entities 실패: %s", ex)
+        return None
+
+
 # ── 세션 로더 ─────────────────────────────────────────────────────────────────
 def _load_sessions() -> list[tuple[str, str]]:
     """SESSION_STRING_1 ~ _10, 없으면 SESSION_STRING 로드."""
@@ -120,6 +161,7 @@ async def broadcast_via_userbot(
     file_id: str = "",
     file_type: str = "photo",
     caption: str = "",
+    caption_entities: str | None = None,
     notify_callback=None,
 ) -> dict:
     """
@@ -173,6 +215,10 @@ async def broadcast_via_userbot(
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton(effective_button_text, url=effective_affiliate_url)]]
     )
+
+    # caption_entities: caption_template 사용 시 원본 entities 무효 (텍스트가 달라짐)
+    _entities_json  = None if _db_caption_tmpl else caption_entities
+    pyrogram_entities = _parse_pyrogram_entities(_entities_json)
 
     # caption_template이 DB에 있으면 우선 사용, 없으면 장전 캡션 그대로
     effective_caption = _db_caption_tmpl or caption
@@ -279,8 +325,9 @@ async def broadcast_via_userbot(
     # ── 헬퍼: 미디어 직접 발송 ──────────────────────────────────────────────
     async def _send_to_user(
         acc: dict,
-        chat_id: str,          # "@username" 문자열 — get_users() 캐시된 peer를 username key로 조회
+        chat_id: str,
         user_caption: str,
+        entities=None,
     ) -> None:
         """
         미디어를 유저에게 직접 발송.
@@ -300,35 +347,27 @@ async def broadcast_via_userbot(
         client: Client = acc["client"]
         cached = acc["cached_file_id"]
         src    = cached if cached else _make_bio()
+        cap_kwargs: dict = {"caption": user_caption, "reply_markup": keyboard}
+        if entities:
+            cap_kwargs["caption_entities"] = entities
 
         if file_type == "video":
             msg = await client.send_video(
                 chat_id, src,
-                caption=user_caption,
-                duration=0,
-                width=0,
-                height=0,
+                duration=0, width=0, height=0,
                 supports_streaming=True,
-                reply_markup=keyboard,
+                **cap_kwargs,
             )
             if not cached and msg.video:
                 acc["cached_file_id"] = msg.video.file_id
 
         elif file_type == "photo":
-            msg = await client.send_photo(
-                chat_id, src,
-                caption=user_caption,
-                reply_markup=keyboard,
-            )
+            msg = await client.send_photo(chat_id, src, **cap_kwargs)
             if not cached and msg.photo:
                 acc["cached_file_id"] = msg.photo.file_id
 
         else:
-            msg = await client.send_document(
-                chat_id, src,
-                caption=user_caption,
-                reply_markup=keyboard,
-            )
+            msg = await client.send_document(chat_id, src, **cap_kwargs)
             if not cached and msg.document:
                 acc["cached_file_id"] = msg.document.file_id
 
@@ -462,7 +501,7 @@ async def broadcast_via_userbot(
 
                     # ── Step B: @username 문자열로 발송 (peer cache 활용) ────
                     try:
-                        await _send_to_user(acc, target, user_caption)
+                        await _send_to_user(acc, target, user_caption, entities=pyrogram_entities)
                         sent += 1
                         acc["daily_sent"] += 1
                         delivered = True

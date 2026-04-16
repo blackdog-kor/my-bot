@@ -9,6 +9,7 @@ Subscribe Bot: /start 환영 메시지 + 구독자 DB 저장 + /admin 관리 메
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -243,11 +244,22 @@ async def admin_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     context.user_data.pop(_AWAITING_KEY, None)
 
+    entities_json: str | None = None
+    if msg.caption_entities:
+        try:
+            entities_json = json.dumps([e.to_dict() for e in msg.caption_entities])
+        except Exception:
+            entities_json = None
+
     try:
         from app.pg_broadcast import add_post, list_posts
         posts     = list_posts()
         max_order = max((p["send_order"] for p in posts), default=-1)
-        post_id   = add_post(file_id, file_type, caption, send_order=max_order + 1)
+        post_id   = add_post(
+            file_id, file_type, caption,
+            send_order=max_order + 1,
+            caption_entities=entities_json,
+        )
     except Exception as e:
         await msg.reply_text(f"❌ 게시물 저장 실패: {e}", reply_markup=_home_keyboard())
         return
@@ -567,10 +579,11 @@ async def _do_push(bot, admin_chat_id: int) -> None:
         await bot.send_message(admin_chat_id, "❌ 발송할 게시물이 없습니다. ➕ 게시물 추가 후 다시 시도하세요.")
         return
 
-    file_id   = post["file_id"]
-    file_type = post["file_type"]
-    post_cap  = post["caption"] or ""
-    post_id   = post["id"]
+    file_id          = post["file_id"]
+    file_type        = post["file_type"]
+    post_cap         = post["caption"] or ""
+    post_id          = post["id"]
+    entities_json    = post.get("caption_entities")
 
     try:
         from app.pg_broadcast import get_subscribe_users
@@ -591,8 +604,24 @@ async def _do_push(bot, admin_chat_id: int) -> None:
 
     effective_affiliate_url = (cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
     _db_caption_tmpl        = (cfg.get("caption_template") or "").strip()
+    btn_text                = (cfg.get("button_text") or "🎰 VIP 카지노 입장").strip()
 
     base_caption = _db_caption_tmpl or post_cap
+
+    dm_keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(btn_text, url=effective_affiliate_url)
+    ]]) if effective_affiliate_url else None
+
+    # caption_template이 있으면 entities 무효 (텍스트가 달라지므로)
+    post_entities: list | None = None
+    if not _db_caption_tmpl and entities_json:
+        try:
+            from telegram import MessageEntity
+            post_entities = [
+                MessageEntity.de_json(e, bot) for e in json.loads(entities_json)
+            ]
+        except Exception:
+            post_entities = None
 
     from app.userbot_sender import personalize_caption
 
@@ -600,7 +629,11 @@ async def _do_push(bot, admin_chat_id: int) -> None:
     for uid, username in users:
         try:
             user_caption = await personalize_caption(base_caption, username)
-            await _send_media(bot, uid, file_id, file_type, user_caption)
+            use_entities = post_entities if user_caption == base_caption else None
+            await _send_media(
+                bot, uid, file_id, file_type, user_caption,
+                reply_markup=dm_keyboard, entities=use_entities,
+            )
             sent += 1
         except Exception as e:
             err = str(e).lower()
@@ -684,17 +717,28 @@ async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
-async def _send_media(bot, chat_id: int, file_id: str, file_type: str, caption: str) -> None:
-    cap = caption or None
+async def _send_media(
+    bot,
+    chat_id: int,
+    file_id: str,
+    file_type: str,
+    caption: str,
+    reply_markup=None,
+    entities=None,
+) -> None:
+    cap  = caption or None
+    opts = {"caption": cap, "reply_markup": reply_markup}
+    if entities:
+        opts["caption_entities"] = entities
     if file_type == "photo":
-        await bot.send_photo(chat_id, file_id, caption=cap)
+        await bot.send_photo(chat_id, file_id, **opts)
     elif file_type == "video":
         try:
-            await bot.send_video(chat_id, file_id, caption=cap)
+            await bot.send_video(chat_id, file_id, **opts)
         except Exception:
-            await bot.send_document(chat_id, file_id, caption=cap)
+            await bot.send_document(chat_id, file_id, **opts)
     else:
-        await bot.send_document(chat_id, file_id, caption=cap)
+        await bot.send_document(chat_id, file_id, **opts)
 
 
 # ── 봇 빌드 / 실행 ────────────────────────────────────────────────────────────

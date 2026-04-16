@@ -571,17 +571,23 @@ def ensure_campaign_posts_table():
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS campaign_posts (
-                id           SERIAL PRIMARY KEY,
-                file_id      TEXT NOT NULL,
-                file_type    TEXT NOT NULL DEFAULT 'photo',
-                caption      TEXT NOT NULL DEFAULT '',
-                is_active    BOOLEAN NOT NULL DEFAULT TRUE,
-                send_order   INTEGER NOT NULL DEFAULT 0,
-                last_sent_at TIMESTAMPTZ,
-                created_at   TIMESTAMPTZ DEFAULT NOW()
+                id                SERIAL PRIMARY KEY,
+                file_id           TEXT NOT NULL,
+                file_type         TEXT NOT NULL DEFAULT 'photo',
+                caption           TEXT NOT NULL DEFAULT '',
+                is_active         BOOLEAN NOT NULL DEFAULT TRUE,
+                send_order        INTEGER NOT NULL DEFAULT 0,
+                last_sent_at      TIMESTAMPTZ,
+                created_at        TIMESTAMPTZ DEFAULT NOW(),
+                caption_entities  TEXT
             )
         """)
         conn.commit()
+        try:
+            cur.execute("ALTER TABLE campaign_posts ADD COLUMN caption_entities TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
         cur.close()
         conn.close()
         logger.info("ensure_campaign_posts_table: OK")
@@ -595,7 +601,8 @@ def get_next_post() -> dict | None:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, file_id, file_type, caption, is_active, send_order, last_sent_at
+            SELECT id, file_id, file_type, caption, is_active, send_order,
+                   last_sent_at, caption_entities
             FROM campaign_posts
             WHERE is_active = TRUE
             ORDER BY COALESCE(last_sent_at, '1970-01-01'::timestamptz) ASC, send_order ASC
@@ -618,6 +625,7 @@ def get_next_post() -> dict | None:
             "id": row[0], "file_id": row[1], "file_type": row[2],
             "caption": row[3], "is_active": row[4],
             "send_order": row[5], "last_sent_at": row[6],
+            "caption_entities": row[7],
         }
     except Exception as e:
         logger.warning("get_next_post failed: %s", e)
@@ -630,7 +638,8 @@ def get_current_post() -> dict | None:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, file_id, file_type, caption, is_active, send_order, last_sent_at
+            SELECT id, file_id, file_type, caption, is_active, send_order,
+                   last_sent_at, caption_entities
             FROM campaign_posts
             WHERE is_active = TRUE
             ORDER BY COALESCE(last_sent_at, '1970-01-01'::timestamptz) ASC, send_order ASC
@@ -645,22 +654,29 @@ def get_current_post() -> dict | None:
             "id": row[0], "file_id": row[1], "file_type": row[2],
             "caption": row[3], "is_active": row[4],
             "send_order": row[5], "last_sent_at": row[6],
+            "caption_entities": row[7],
         }
     except Exception as e:
         logger.warning("get_current_post failed: %s", e)
         return None
 
 
-def add_post(file_id: str, file_type: str, caption: str, send_order: int = 0) -> int | None:
+def add_post(
+    file_id: str,
+    file_type: str,
+    caption: str,
+    send_order: int = 0,
+    caption_entities: str | None = None,
+) -> int | None:
     """게시물 추가. 삽입된 id 반환. 실패 시 None."""
     try:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO campaign_posts (file_id, file_type, caption, send_order)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO campaign_posts (file_id, file_type, caption, send_order, caption_entities)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING id
-        """, (file_id, file_type, caption, send_order))
+        """, (file_id, file_type, caption, send_order, caption_entities))
         row = cur.fetchone()
         conn.commit()
         cur.close()
