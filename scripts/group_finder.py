@@ -34,7 +34,7 @@ ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 MAX_GROUPS_PER_RUN      = int(os.getenv("MAX_GROUPS_PER_RUN",      "20"))
 MAX_RESULTS_PER_KEYWORD = int(os.getenv("MAX_RESULTS_PER_KEYWORD", "50"))
 KEYWORD_DELAY_SEC       = float(os.getenv("KEYWORD_DELAY_SEC",     "5.0"))
-MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "500"))
+MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
@@ -80,7 +80,7 @@ async def search_groups_by_keyword(
     keyword: str,
     seen_ids: set[int],
     max_per_keyword: int,
-    min_members: int = 500,
+    min_members: int = MIN_MEMBER_COUNT,
 ) -> list[dict]:
     """
     keyword로 search_global 호출 → 그룹/슈퍼그룹/채널 추출.
