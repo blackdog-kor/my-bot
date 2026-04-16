@@ -36,9 +36,10 @@ from pyrogram.errors import (
     UsernameInvalid,
 )
 
-API_ID = int(os.getenv("API_ID", "37398454"))
-API_HASH = os.getenv("API_HASH", "a73350e09f51f516d8eac08498967750")
-SESSION_STRING = os.getenv("SESSION_STRING", "")
+# ── 환경변수 (하드코드 제거: 미설정 시 실패 처리) ─────────────────────────
+API_ID_RAW = (os.getenv("API_ID") or "0").strip()
+API_ID = int(API_ID_RAW) if API_ID_RAW.isdigit() else 0
+API_HASH = (os.getenv("API_HASH") or "").strip()
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID = (os.getenv("ADMIN_ID") or "").strip()
 
@@ -75,6 +76,18 @@ _USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 ]
+
+
+def _get_session() -> tuple[str, str] | None:
+    for i in range(1, 11):
+        key = f"SESSION_STRING_{i}"
+        val = (os.getenv(key) or "").strip()
+        if val:
+            return (key, val)
+    val = (os.getenv("SESSION_STRING") or "").strip()
+    if val:
+        return ("SESSION_STRING", val)
+    return None
 
 
 def _telegram_notify(text: str) -> None:
@@ -299,9 +312,21 @@ async def main() -> None:
     print("\n" + "=" * 62)
     print("   경쟁사 멤버 자동 수집기  (DuckDuckGo + Pyrogram + PG)")
     print("=" * 62)
-    if not SESSION_STRING:
-        print("\n❌ SESSION_STRING 환경변수가 없습니다.")
+    if not API_ID or not API_HASH:
+        msg = "❌ API_ID 또는 API_HASH 환경변수가 설정되지 않았습니다."
+        print(msg)
+        _telegram_notify(f"❌ member_scraper 실패\n{msg}")
         sys.exit(1)
+
+    session_info = _get_session()
+    if not session_info:
+        msg = "❌ SESSION_STRING_1..10 또는 SESSION_STRING 환경변수가 없습니다."
+        print(msg)
+        _telegram_notify(f"❌ member_scraper 실패\n{msg}")
+        sys.exit(1)
+
+    session_label, session_string = session_info
+    print(f"✅ 세션 사용: {session_label}")
 
     from app.pg_broadcast import (
         ensure_pg_table,
@@ -352,7 +377,13 @@ async def main() -> None:
         print(f"  📋 discovered_groups 에서 {len(unscraped)}개 로드\n")
 
     if not all_groups:
-        print("\n⚠️ 수집 가능한 그룹이 없습니다.")
+        msg = (
+            "⚠️ 수집 가능한 그룹이 없습니다.\n"
+            "원인: DuckDuckGo 차단 / discovered_groups 비어있음 / TARGET_GROUPS 미설정\n"
+            "확인: group_finder 로그 + TARGET_GROUPS 환경변수"
+        )
+        print(f"\n{msg}")
+        _telegram_notify(f"⚠️ member_scraper — {msg}")
         sys.exit(0)
 
     # 브로드캐스트 계정들을 수집 그룹에 join — PEER_ID_INVALID 방지의 핵심
@@ -373,10 +404,11 @@ async def main() -> None:
     ok_groups = fail_groups = 0
 
     async with Client(
-        name="scraper_session",
+        name=f"scraper_{session_label}",
         api_id=API_ID,
         api_hash=API_HASH,
-        session_string=SESSION_STRING,
+        session_string=session_string,
+        in_memory=True,
     ) as app:
         for i, handle in enumerate(all_groups):
             gid = discovered_group_map.get(handle.lower())
