@@ -69,8 +69,14 @@ def _run_script(script_name: str, job_label: str) -> bool:
             timeout=3600 * 2,
         )
         if result.returncode != 0:
-            err = (result.stderr or result.stdout or "")[:1500]
-            _notify(f"❌ {job_label} 실패 (exit %s)\n{err}".strip())
+            stdout_tail = (result.stdout or "").strip()[-1200:]
+            stderr_tail = (result.stderr or "").strip()[-800:]
+            parts = [f"❌ {job_label} 실패 (exit {result.returncode})"]
+            if stdout_tail:
+                parts.append(f"\n[stdout]\n{stdout_tail}")
+            if stderr_tail:
+                parts.append(f"\n[stderr]\n{stderr_tail}")
+            _notify("".join(parts)[:4000])
             return False
         return True
     except subprocess.TimeoutExpired:
