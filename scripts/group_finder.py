@@ -83,9 +83,9 @@ async def search_groups_by_keyword(
     min_members: int = MIN_MEMBER_COUNT,
 ) -> list[dict]:
     """
-    keyword로 search_global 호출 → 그룹/슈퍼그룹/채널 추출.
-    search_global의 경량 chat 객체는 members_count를 신뢰할 수 없으므로
-    get_chat()으로 실제 멤버 수를 별도 조회 후 필터링.
+    keyword로 search_global 호출 → get_chat()으로 username + 멤버 수 재확인.
+    search_global 경량 chat은 username/members_count 미완성일 수 있으므로
+    get_chat()을 단일 진실 출처로 사용.
     반환: [{"id": int, "username": str, "title": str, "member_count": int}, ...]
     """
     from pyrogram.enums import ChatType
@@ -93,17 +93,14 @@ async def search_groups_by_keyword(
 
     candidates: list[dict] = []
     valid_types = {ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL}
-    raw_seen = filtered_no_username = filtered_type = 0
+    raw_seen = filtered_type = 0
 
-    # ── Phase 1: search_global로 후보 수집 (멤버 수 필터 없음) ──────────────
+    # ── Phase 1: search_global로 후보 수집 (username 필터 없음) ──────────────
     try:
         async for message in client.search_global(keyword, limit=max_per_keyword):
             raw_seen += 1
             chat = message.chat
             if not chat:
-                continue
-            if not chat.username:
-                filtered_no_username += 1
                 continue
             if chat.type not in valid_types:
                 filtered_type += 1
@@ -111,11 +108,7 @@ async def search_groups_by_keyword(
             if chat.id in seen_ids:
                 continue
             seen_ids.add(chat.id)
-            candidates.append({
-                "id":       chat.id,
-                "username": chat.username,
-                "title":    chat.title or "",
-            })
+            candidates.append({"id": chat.id, "title": chat.title or ""})
     except FloodWait as e:
         wait = int(e.value or 30) + 5
         print(f"    ⏳ search_global FloodWait {wait}초 대기...")
@@ -124,38 +117,42 @@ async def search_groups_by_keyword(
         print(f"    ⚠️ '{keyword}' 검색 실패: {type(e).__name__} — {e}")
 
     print(
-        f"    🔎 raw={raw_seen} / no_username={filtered_no_username} "
-        f"/ wrong_type={filtered_type} / 후보={len(candidates)}"
+        f"    🔎 raw={raw_seen} / wrong_type={filtered_type} / 후보={len(candidates)}"
     )
 
-    # ── Phase 2: get_chat()으로 실제 멤버 수 조회 후 필터 ───────────────────
+    # ── Phase 2: get_chat()으로 username + 실제 멤버 수 재확인 ──────────────
     results: list[dict] = []
-    filtered_members = get_chat_fail = 0
+    filtered_no_username = filtered_members = get_chat_fail = 0
 
     for cand in candidates:
         try:
             full = await client.get_chat(cand["id"])
-            member_count = getattr(full, "members_count", 0) or 0
         except Exception as e:
             get_chat_fail += 1
-            print(f"    ⚠️ get_chat 실패 @{cand['username']}: {type(e).__name__} — {e}")
+            print(f"    ⚠️ get_chat 실패 (id={cand['id']}): {type(e).__name__} — {e}")
             continue
 
+        username = getattr(full, "username", None) or ""
+        if not username:
+            filtered_no_username += 1
+            continue
+
+        member_count = getattr(full, "members_count", 0) or 0
         if member_count > 0 and member_count < min_members:
             filtered_members += 1
             continue
 
         results.append({
             "id":           cand["id"],
-            "username":     cand["username"],
+            "username":     username,
             "title":        full.title or cand["title"],
             "member_count": member_count,
         })
         await asyncio.sleep(0.5)
 
     print(
-        f"    ✅ get_chat_fail={get_chat_fail} / low_members={filtered_members} "
-        f"/ 최종={len(results)}"
+        f"    ✅ get_chat_fail={get_chat_fail} / no_username={filtered_no_username} "
+        f"/ low_members={filtered_members} / 최종={len(results)}"
     )
     return results
 
