@@ -80,24 +80,23 @@ async def search_groups_by_keyword(
     keyword: str,
     seen_ids: set[int],
     max_per_keyword: int,
-    min_members: int = 1000,
+    min_members: int = 500,
 ) -> list[dict]:
     """
     keyword로 search_global 호출 → 그룹/슈퍼그룹/채널 추출.
+    search_global의 경량 chat 객체는 members_count를 신뢰할 수 없으므로
+    get_chat()으로 실제 멤버 수를 별도 조회 후 필터링.
     반환: [{"id": int, "username": str, "title": str, "member_count": int}, ...]
     """
     from pyrogram.enums import ChatType
     from pyrogram.errors import FloodWait
 
-    results: list[dict] = []
+    candidates: list[dict] = []
     valid_types = {ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL}
-    raw_seen = 0
-    filtered_no_username = 0
-    filtered_type = 0
-    filtered_members = 0
+    raw_seen = filtered_no_username = filtered_type = 0
 
+    # ── Phase 1: search_global로 후보 수집 (멤버 수 필터 없음) ──────────────
     try:
-        count = 0
         async for message in client.search_global(keyword, limit=max_per_keyword):
             raw_seen += 1
             chat = message.chat
@@ -111,27 +110,12 @@ async def search_groups_by_keyword(
                 continue
             if chat.id in seen_ids:
                 continue
-            # search_global의 경량 chat 객체는 members_count=0 반환 → 0이면 알 수 없음으로 간주해 통과
-            member_count = getattr(chat, "members_count", 0) or 0
-            if member_count > 0 and member_count < min_members:
-                filtered_members += 1
-                continue
             seen_ids.add(chat.id)
-            results.append({
-                "id":           chat.id,
-                "username":     chat.username,
-                "title":        chat.title or "",
-                "member_count": member_count,
+            candidates.append({
+                "id":       chat.id,
+                "username": chat.username,
+                "title":    chat.title or "",
             })
-            count += 1
-            if count >= max_per_keyword:
-                break
-
-        print(
-            f"    🔎 raw={raw_seen} / no_username={filtered_no_username} "
-            f"/ wrong_type={filtered_type} / low_members={filtered_members} "
-            f"/ 통과={len(results)}"
-        )
     except FloodWait as e:
         wait = int(e.value or 30) + 5
         print(f"    ⏳ search_global FloodWait {wait}초 대기...")
@@ -139,6 +123,40 @@ async def search_groups_by_keyword(
     except Exception as e:
         print(f"    ⚠️ '{keyword}' 검색 실패: {type(e).__name__} — {e}")
 
+    print(
+        f"    🔎 raw={raw_seen} / no_username={filtered_no_username} "
+        f"/ wrong_type={filtered_type} / 후보={len(candidates)}"
+    )
+
+    # ── Phase 2: get_chat()으로 실제 멤버 수 조회 후 필터 ───────────────────
+    results: list[dict] = []
+    filtered_members = get_chat_fail = 0
+
+    for cand in candidates:
+        try:
+            full = await client.get_chat(cand["id"])
+            member_count = getattr(full, "members_count", 0) or 0
+        except Exception as e:
+            get_chat_fail += 1
+            print(f"    ⚠️ get_chat 실패 @{cand['username']}: {type(e).__name__} — {e}")
+            continue
+
+        if member_count > 0 and member_count < min_members:
+            filtered_members += 1
+            continue
+
+        results.append({
+            "id":           cand["id"],
+            "username":     cand["username"],
+            "title":        full.title or cand["title"],
+            "member_count": member_count,
+        })
+        await asyncio.sleep(0.5)
+
+    print(
+        f"    ✅ get_chat_fail={get_chat_fail} / low_members={filtered_members} "
+        f"/ 최종={len(results)}"
+    )
     return results
 
 
