@@ -148,10 +148,6 @@ async def broadcast_via_userbot(
         count_unsent_with_username,
     )
 
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("VIP CASINO", url=VIP_URL)]]
-    )
-
     async def _notify(msg: str) -> None:
         if notify_callback:
             try:
@@ -167,11 +163,16 @@ async def broadcast_via_userbot(
         logger.warning("campaign_config 로드 실패, 환경변수 폴백 사용: %s", _cfg_err)
         _cfg = {}
 
-    # affiliate_url: DB 값이 있으면 사용, 없으면 AFFILIATE_URL 환경변수 폴백
-    effective_affiliate_url = (_cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL
+    # affiliate_url: DB 값이 있으면 사용, 없으면 AFFILIATE_URL 환경변수 → VIP_URL 순 폴백
+    effective_affiliate_url = (_cfg.get("affiliate_url") or "").strip() or AFFILIATE_URL or VIP_URL
+    effective_button_text   = (_cfg.get("button_text") or "").strip() or "🎰 VIP 카지노 입장"
     _db_caption_tmpl        = (_cfg.get("caption_template") or "").strip()
     _db_promo_code          = (_cfg.get("promo_code") or "").strip()
     _subscribe_bot_link     = (_cfg.get("subscribe_bot_link") or "t.me/blackdog_eve_casino_bot").strip()
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton(effective_button_text, url=effective_affiliate_url)]]
+    )
 
     # caption_template이 DB에 있으면 우선 사용, 없으면 장전 캡션 그대로
     effective_caption = _db_caption_tmpl or caption

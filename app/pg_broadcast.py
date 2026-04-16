@@ -732,6 +732,7 @@ def ensure_campaign_config_table():
                 promo_code         TEXT NOT NULL DEFAULT '',
                 caption_template   TEXT NOT NULL DEFAULT '',
                 subscribe_bot_link TEXT NOT NULL DEFAULT 't.me/blackdog_eve_casino_bot',
+                button_text        TEXT NOT NULL DEFAULT '🎰 VIP 카지노 입장',
                 updated_at         TIMESTAMPTZ DEFAULT NOW(),
                 CHECK (id = 1)
             )
@@ -741,15 +742,18 @@ def ensure_campaign_config_table():
             ON CONFLICT (id) DO NOTHING
         """)
         conn.commit()
-        # 기존 테이블에 subscribe_bot_link 컬럼 없으면 추가
-        try:
-            cur.execute(
-                "ALTER TABLE campaign_config ADD COLUMN subscribe_bot_link "
-                "TEXT NOT NULL DEFAULT 't.me/blackdog_eve_casino_bot'"
-            )
-            conn.commit()
-        except Exception:
-            conn.rollback()
+        # 기존 테이블에 누락된 컬럼 추가
+        for col_def in [
+            ("subscribe_bot_link", "TEXT NOT NULL DEFAULT 't.me/blackdog_eve_casino_bot'"),
+            ("button_text",        "TEXT NOT NULL DEFAULT '🎰 VIP 카지노 입장'"),
+        ]:
+            try:
+                cur.execute(
+                    f"ALTER TABLE campaign_config ADD COLUMN {col_def[0]} {col_def[1]}"
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
         cur.close()
         conn.close()
         logger.info("ensure_campaign_config_table: OK")
@@ -765,7 +769,8 @@ def get_campaign_config() -> dict:
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute("""
-            SELECT affiliate_url, promo_code, caption_template, subscribe_bot_link, updated_at
+            SELECT affiliate_url, promo_code, caption_template, subscribe_bot_link,
+                   button_text, updated_at
             FROM campaign_config WHERE id = 1
         """)
         row = cur.fetchone()
@@ -777,13 +782,15 @@ def get_campaign_config() -> dict:
                 "promo_code":         row[1] or "",
                 "caption_template":   row[2] or "",
                 "subscribe_bot_link": row[3] or _SUBSCRIBE_BOT_LINK_DEFAULT,
-                "updated_at":         row[4],
+                "button_text":        row[4] or "🎰 VIP 카지노 입장",
+                "updated_at":         row[5],
             }
     except Exception as e:
         logger.warning("get_campaign_config failed: %s", e)
     return {
         "affiliate_url": "", "promo_code": "", "caption_template": "",
-        "subscribe_bot_link": _SUBSCRIBE_BOT_LINK_DEFAULT, "updated_at": None,
+        "subscribe_bot_link": _SUBSCRIBE_BOT_LINK_DEFAULT,
+        "button_text": "🎰 VIP 카지노 입장", "updated_at": None,
     }
 
 
@@ -793,7 +800,7 @@ def update_campaign_config(field: str, value: str) -> bool:
     허용 필드: affiliate_url, promo_code, caption_template, subscribe_bot_link
     SQL injection 방지: 허용 목록 검증 후 f-string 사용 (값은 파라미터 바인딩).
     """
-    _ALLOWED = {"affiliate_url", "promo_code", "caption_template", "subscribe_bot_link"}
+    _ALLOWED = {"affiliate_url", "promo_code", "caption_template", "subscribe_bot_link", "button_text"}
     if field not in _ALLOWED:
         logger.warning("update_campaign_config: 허용되지 않은 필드 %r", field)
         return False
