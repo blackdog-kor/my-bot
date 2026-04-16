@@ -250,3 +250,13 @@ python scripts/generate_session.py  (로컬 실행, 전화번호 입력 필요)
 배포: GitHub push → Railway 자동 배포
 코드 수정 승인: Claude Code에서 "Yes, and don't ask again"
 테스트 순서: /debug/session-test → /debug/dm-test → 구독봇 1명 테스트 → 전체 발송
+
+---
+
+## 16. 개발 방향 원칙
+
+- 작은 수정으로 문제 해결 시도 금지
+- 이미 완성된 오픈소스/최신 툴을 먼저 검토하고 도입
+- 전세계 개발자들이 만든 마케팅/자동화 툴 적극 통합
+- 자체 코드 수정보다 검증된 라이브러리/툴 교체 우선
+- 최신 기술 트렌드 반영이 기본 방향
