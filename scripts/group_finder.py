@@ -44,21 +44,21 @@ MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
-    "cassino online telegram grupo link",
-    "casino telegram grupo brasil",
-    "apostas online telegram grupo",
-    "fortune tiger telegram grupo",
-    "aviator telegram brasil grupo",
-    "tigrinho telegram comunidade",
-    "mines telegram grupo apostas",
-    "blaze telegram grupo",
-    "crash telegram apostas brasil",
-    "slots telegram grupo brasil",
-    "roleta telegram casino grupo",
-    "poker online telegram grupo",
-    "cassino ao vivo telegram",
-    "bet telegram grupo brasil link",
-    "jogo online telegram comunidade",
+    "site:t.me cassino brasil",
+    "site:t.me fortune tiger grupo",
+    "site:t.me tigrinho apostas",
+    "site:t.me aviator brasil",
+    "site:t.me 1win brasil",
+    "site:t.me apostas esportivas grupo",
+    "site:t.me crypto cassino brasil",
+    "site:t.me betano grupo telegram",
+    "site:t.me stake brasil telegram",
+    "site:t.me bonus cassino telegram",
+    "site:t.me cassino online brasil",
+    "site:t.me slots brasil grupo",
+    "site:t.me gates of olympus telegram",
+    "site:t.me crash game brasil",
+    "site:t.me bitcoin cassino grupo",
 ]
 _kw_env = os.getenv("SEARCH_KEYWORDS", "").strip()
 SEARCH_KEYWORDS: list[str] = (
@@ -130,7 +130,8 @@ def _search_brightdata(query: str) -> list[str]:
                     "Authorization": f"Bearer {BRIGHTDATA_API_TOKEN}",
                     "Content-Type": "application/json",
                 },
-                json={"zone": "serp", "url": google_url, "format": "raw"},
+                json={"zone": "serp", "url": google_url, "format": "raw",
+                      "country": "BR", "lang": "pt-BR"},
             )
     except Exception as e:
         print(f"    ⚠️ Bright Data 요청 실패: {type(e).__name__} — {e}")
