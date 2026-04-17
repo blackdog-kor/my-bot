@@ -9,8 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,10 +104,61 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# ── Railway MCP 프록시 ──────────────────────────────────────────
+# Anthropic VM IP가 Railway API에서 403 차단되는 문제를 우회.
+# 이 앱(Railway 위에서 실행)이 Railway API를 대신 호출함.
+# MCP 서버 URL: https://<앱 도메인>/railway-mcp/mcp
+# 인증: Authorization: Bearer {RAILWAY_PROXY_SECRET}
+_RAILWAY_PROXY_SECRET = os.getenv("RAILWAY_PROXY_SECRET", "").strip()
+
+
+@app.middleware("http")
+async def _mcp_auth(request: Request, call_next):
+    if request.url.path.startswith("/railway-mcp"):
+        if _RAILWAY_PROXY_SECRET:
+            auth = request.headers.get("Authorization", "")
+            if auth != f"Bearer {_RAILWAY_PROXY_SECRET}":
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+try:
+    from app.railway_mcp_server import mcp as _railway_mcp
+    app.mount("/railway-mcp", _railway_mcp.streamable_http_app())
+    logger.info("Railway MCP 서버 마운트 완료 → /railway-mcp/mcp")
+except Exception as _e:
+    logger.warning("Railway MCP 서버 마운트 실패: %s", _e)
+
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/railway-mcp-info")
+def railway_mcp_info(request: Request):
+    """Claude.ai/code에서 Railway MCP 서버 등록 방법을 안내합니다."""
+    base = str(request.base_url).rstrip("/")
+    mcp_url = f"{base}/railway-mcp/mcp"
+    return {
+        "mcp_server_url": mcp_url,
+        "auth_required": bool(_RAILWAY_PROXY_SECRET),
+        "setup": {
+            "step1": "Railway 대시보드 > Account Settings > Tokens 에서 API 토큰 발급",
+            "step2": "Railway 환경변수에 RAILWAY_API_TOKEN=<토큰> 추가",
+            "step3": f"Railway 환경변수에 RAILWAY_PROXY_SECRET=<임의비밀값> 추가 (현재: {'설정됨' if _RAILWAY_PROXY_SECRET else '미설정'})",
+            "step4": "Claude.ai/code > Settings > MCP Servers 에 아래 설정 추가",
+        },
+        "claude_mcp_config": {
+            "mcpServers": {
+                "railway": {
+                    "type": "http",
+                    "url": mcp_url,
+                    **({"headers": {"Authorization": "Bearer <RAILWAY_PROXY_SECRET값>"}} if _RAILWAY_PROXY_SECRET else {}),
+                }
+            }
+        },
+    }
 
 
 @app.get("/debug/routes")

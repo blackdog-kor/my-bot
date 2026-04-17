@@ -12,3 +12,4 @@ beautifulsoup4
 lxml
 google-generativeai
 scrapling[fetchers]
+mcp>=1.6.0
