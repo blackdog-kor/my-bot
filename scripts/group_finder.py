@@ -1,22 +1,27 @@
 """
-텔레그램 그룹 자동 발굴 (Pyrogram search_global).
-매일 03:00 스케줄러에서 실행.
+텔레그램 그룹 자동 발굴 — Bright Data SERP API + Pyrogram get_chat() 검증.
+매일 03:00 UTC 스케줄러에서 실행.
 
 흐름:
-  1. SESSION_STRING_1 (없으면 SESSION_STRING) 으로 Pyrogram 연결
-  2. SEARCH_KEYWORDS 키워드별 search_global 호출
-  3. 그룹/슈퍼그룹/채널 중 username이 있는 것만 discovered_groups 테이블에 저장
-  4. 완료 후 관리자 DM 알림
+  1. BRIGHTDATA_API_TOKEN으로 Bright Data SERP API 호출 → t.me 링크 수집
+  2. t.me 링크에서 username 추출
+  3. SESSION_STRING_1 (없으면 SESSION_STRING)으로 Pyrogram 연결
+  4. get_chat()으로 username + 실제 멤버 수 재확인
+  5. 조건 통과 시 discovered_groups 테이블에 저장
+  6. 완료 후 관리자 DM 알림
 """
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote, urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,16 +35,30 @@ API_HASH = (os.getenv("API_HASH") or "").strip()
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
 ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+BRIGHTDATA_API_TOKEN = (os.getenv("BRIGHTDATA_API_TOKEN") or "").strip()
 
 MAX_GROUPS_PER_RUN      = int(os.getenv("MAX_GROUPS_PER_RUN",      "20"))
 MAX_RESULTS_PER_KEYWORD = int(os.getenv("MAX_RESULTS_PER_KEYWORD", "50"))
-KEYWORD_DELAY_SEC       = float(os.getenv("KEYWORD_DELAY_SEC",     "5.0"))
+KEYWORD_DELAY_SEC       = float(os.getenv("KEYWORD_DELAY_SEC",     "3.0"))
 MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
-    "카지노", "바카라", "슬롯", "온라인카지노",
-    "스포츠배팅", "토토", "해외배팅",
+    "cassino online telegram grupo link",
+    "casino telegram grupo brasil",
+    "apostas online telegram grupo",
+    "fortune tiger telegram grupo",
+    "aviator telegram brasil grupo",
+    "tigrinho telegram comunidade",
+    "mines telegram grupo apostas",
+    "blaze telegram grupo",
+    "crash telegram apostas brasil",
+    "slots telegram grupo brasil",
+    "roleta telegram casino grupo",
+    "poker online telegram grupo",
+    "cassino ao vivo telegram",
+    "bet telegram grupo brasil link",
+    "jogo online telegram comunidade",
 ]
 _kw_env = os.getenv("SEARCH_KEYWORDS", "").strip()
 SEARCH_KEYWORDS: list[str] = (
@@ -64,7 +83,6 @@ def _notify(text: str) -> None:
 
 
 def _get_session() -> tuple[str, str] | None:
-    """SESSION_STRING_1 우선, 없으면 SESSION_STRING."""
     for i in range(1, 11):
         val = (os.getenv(f"SESSION_STRING_{i}") or "").strip()
         if val:
@@ -75,84 +93,150 @@ def _get_session() -> tuple[str, str] | None:
     return None
 
 
-async def search_groups_by_keyword(
-    client,
-    keyword: str,
-    seen_ids: set[int],
-    max_per_keyword: int,
-    min_members: int = MIN_MEMBER_COUNT,
-) -> list[dict]:
-    """
-    keyword로 search_global 호출 → get_chat()으로 username + 멤버 수 재확인.
-    search_global 경량 chat은 username/members_count 미완성일 수 있으므로
-    get_chat()을 단일 진실 출처로 사용.
-    반환: [{"id": int, "username": str, "title": str, "member_count": int}, ...]
-    """
-    from pyrogram.enums import ChatType
-    from pyrogram.errors import FloodWait
-
-    candidates: list[dict] = []
-    valid_types = {ChatType.GROUP, ChatType.SUPERGROUP, ChatType.CHANNEL}
-    raw_seen = filtered_type = 0
-
-    # ── Phase 1: search_global로 후보 수집 (username 필터 없음) ──────────────
+def _extract_tme_from_html(html: str) -> list[str]:
+    """HTML에서 t.me URL 추출."""
+    found: list[str] = []
     try:
-        async for message in client.search_global(keyword, limit=max_per_keyword):
-            raw_seen += 1
-            chat = message.chat
-            if not chat:
-                continue
-            if chat.type not in valid_types:
-                filtered_type += 1
-                continue
-            if chat.id in seen_ids:
-                continue
-            seen_ids.add(chat.id)
-            candidates.append({"id": chat.id, "title": chat.title or ""})
-    except FloodWait as e:
-        wait = int(e.value or 30) + 5
-        print(f"    ⏳ search_global FloodWait {wait}초 대기...")
-        await asyncio.sleep(wait)
-    except Exception as e:
-        print(f"    ⚠️ '{keyword}' 검색 실패: {type(e).__name__} — {e}")
+        soup = BeautifulSoup(html, "lxml")
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "t.me/" in href:
+                found.append(href)
+    except Exception:
+        pass
+    for match in re.findall(r"https?://t\.me/[A-Za-z0-9_@+/]+", html):
+        found.append(match)
+    return found
 
-    print(
-        f"    🔎 raw={raw_seen} / wrong_type={filtered_type} / 후보={len(candidates)}"
+
+def _search_brightdata(query: str) -> list[str]:
+    """
+    Bright Data SERP API로 Google 검색 → t.me URL 목록 반환.
+    응답이 JSON이면 organic 결과 파싱, 아니면 HTML 파싱 fallback.
+    """
+    if not BRIGHTDATA_API_TOKEN:
+        return []
+
+    google_url = (
+        f"https://www.google.com/search"
+        f"?q={quote(query)}&num=20&gl=br&hl=pt-BR"
     )
 
-    # ── Phase 2: get_chat()으로 username + 실제 멤버 수 재확인 ──────────────
-    results: list[dict] = []
-    filtered_no_username = filtered_members = get_chat_fail = 0
+    try:
+        with httpx.Client(timeout=60) as hc:
+            resp = hc.post(
+                "https://api.brightdata.com/request",
+                headers={
+                    "Authorization": f"Bearer {BRIGHTDATA_API_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={"zone": "serp", "url": google_url, "format": "raw"},
+            )
+    except Exception as e:
+        print(f"    ⚠️ Bright Data 요청 실패: {type(e).__name__} — {e}")
+        return []
 
-    for cand in candidates:
+    if resp.status_code != 200:
+        print(f"    ⚠️ Bright Data HTTP {resp.status_code}: {resp.text[:300]}")
+        return []
+
+    urls: list[str] = []
+    content_type = resp.headers.get("content-type", "")
+
+    if "json" in content_type:
         try:
-            full = await client.get_chat(cand["id"])
+            data = resp.json()
+            for item in data.get("organic", data.get("results", [])):
+                link = item.get("link") or item.get("url") or ""
+                if "t.me/" in link:
+                    urls.append(link)
+                for field in ("snippet", "description", "title"):
+                    text = item.get(field) or ""
+                    urls.extend(re.findall(r"https?://t\.me/[A-Za-z0-9_@+/]+", text))
+        except Exception:
+            pass
+
+    if not urls:
+        urls = _extract_tme_from_html(resp.text)
+
+    return urls
+
+
+def _tme_url_to_username(url: str) -> str | None:
+    """t.me URL → @username. 초대링크(+, joinchat) 는 None."""
+    try:
+        path = urlparse(url).path.lstrip("/")
+    except Exception:
+        return None
+    if not path:
+        return None
+    slug = path.split("/")[0]
+    if slug.startswith("+") or slug.lower().startswith("joinchat"):
+        return None
+    if len(slug) < 4 or slug.isdigit():
+        return None
+    return slug
+
+
+async def _verify_groups(
+    client,
+    usernames: list[str],
+    seen_ids: set[int],
+    min_members: int,
+) -> list[dict]:
+    """
+    Pyrogram get_chat()으로 각 username을 검증.
+    반환: [{"id", "username", "title", "member_count"}, ...]
+    """
+    from pyrogram.errors import FloodWait
+
+    results: list[dict] = []
+    no_username = low_members = fail_count = 0
+
+    for uname in usernames:
+        try:
+            full = await client.get_chat(f"@{uname}")
+        except FloodWait as e:
+            wait = int(e.value or 30) + 5
+            print(f"    ⏳ get_chat FloodWait {wait}초 대기...")
+            await asyncio.sleep(wait)
+            try:
+                full = await client.get_chat(f"@{uname}")
+            except Exception as e2:
+                fail_count += 1
+                print(f"    ⚠️ get_chat 재시도 실패 @{uname}: {e2}")
+                continue
         except Exception as e:
-            get_chat_fail += 1
-            print(f"    ⚠️ get_chat 실패 (id={cand['id']}): {type(e).__name__} — {e}")
+            fail_count += 1
+            print(f"    ⚠️ get_chat 실패 @{uname}: {type(e).__name__} — {e}")
             continue
 
-        username = getattr(full, "username", None) or ""
-        if not username:
-            filtered_no_username += 1
+        chat_id = getattr(full, "id", None)
+        if not chat_id or chat_id in seen_ids:
+            continue
+
+        actual_username = getattr(full, "username", None) or ""
+        if not actual_username:
+            no_username += 1
             continue
 
         member_count = getattr(full, "members_count", 0) or 0
         if member_count > 0 and member_count < min_members:
-            filtered_members += 1
+            low_members += 1
             continue
 
+        seen_ids.add(chat_id)
         results.append({
-            "id":           cand["id"],
-            "username":     username,
-            "title":        full.title or cand["title"],
+            "id":           chat_id,
+            "username":     actual_username,
+            "title":        getattr(full, "title", "") or uname,
             "member_count": member_count,
         })
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.4)
 
     print(
-        f"    ✅ get_chat_fail={get_chat_fail} / no_username={filtered_no_username} "
-        f"/ low_members={filtered_members} / 최종={len(results)}"
+        f"    ✅ get_chat_fail={fail_count} / no_username={no_username} "
+        f"/ low_members={low_members} / 최종={len(results)}"
     )
     return results
 
@@ -167,18 +251,25 @@ async def main() -> None:
     )
 
     print("\n" + "=" * 62)
-    print("   텔레그램 그룹 자동 발굴  (Pyrogram search_global)")
+    print("   텔레그램 그룹 자동 발굴  (Bright Data SERP + Pyrogram)")
     print("=" * 62)
+
+    if not BRIGHTDATA_API_TOKEN:
+        msg = "❌ BRIGHTDATA_API_TOKEN 환경변수가 없습니다."
+        print(msg)
+        _notify(f"❌ group_finder 실패: {msg}")
+        sys.exit(1)
 
     session_info = _get_session()
     if not session_info:
-        print("❌ SESSION_STRING 환경변수가 없습니다.")
-        _notify("❌ group_finder 실패: SESSION_STRING 없음")
+        msg = "❌ SESSION_STRING 환경변수가 없습니다."
+        print(msg)
+        _notify(f"❌ group_finder 실패: {msg}")
         sys.exit(1)
 
     label, session_string = session_info
     print(f"✅ 세션 사용: {label}")
-    print(f"🔑 검색 키워드 {len(SEARCH_KEYWORDS)}개: {', '.join(SEARCH_KEYWORDS)}")
+    print(f"🔑 검색 키워드 {len(SEARCH_KEYWORDS)}개: {', '.join(SEARCH_KEYWORDS[:3])}...")
     print(f"👥 멤버 수 필터: {MIN_MEMBER_COUNT:,}명 이상")
 
     ensure_discovered_groups_table()
@@ -186,13 +277,45 @@ async def main() -> None:
     print(f"🗑️  기존 데이터 {deleted}개 삭제 (discovered_groups 초기화)\n")
 
     _notify(
-        f"🔍 그룹 발굴 시작\n"
+        f"🔍 그룹 발굴 시작 (Bright Data SERP)\n"
         f"• 키워드: {len(SEARCH_KEYWORDS)}개\n"
         f"• 최대 발굴: {MAX_GROUPS_PER_RUN}개\n"
         f"• 멤버 최소: {MIN_MEMBER_COUNT:,}명\n"
         f"• 기존 데이터 {deleted}개 삭제"
     )
 
+    # Phase 1: Bright Data SERP → username 후보 수집
+    print("\n[Phase 1] Bright Data SERP API로 t.me 링크 수집 중...\n")
+    username_candidates: list[str] = []
+    seen_usernames: set[str] = set()
+
+    for i, keyword in enumerate(SEARCH_KEYWORDS):
+        print(f"  [{i+1}/{len(SEARCH_KEYWORDS)}] 검색: '{keyword}'")
+        raw_urls = _search_brightdata(keyword)
+        new_this_kw = 0
+        for url in raw_urls:
+            uname = _tme_url_to_username(url)
+            if not uname:
+                continue
+            uname_lower = uname.lower()
+            if uname_lower not in seen_usernames:
+                seen_usernames.add(uname_lower)
+                username_candidates.append(uname)
+                new_this_kw += 1
+        print(f"    🔎 raw_urls={len(raw_urls)} / 신규 username={new_this_kw} / 누적={len(username_candidates)}")
+        if i < len(SEARCH_KEYWORDS) - 1:
+            time.sleep(KEYWORD_DELAY_SEC)
+
+    print(f"\n  📋 Phase 1 완료: username 후보 {len(username_candidates)}개\n")
+
+    if not username_candidates:
+        msg = "⚠️ Bright Data SERP에서 t.me 링크를 찾지 못했습니다."
+        print(msg)
+        _notify(f"⚠️ group_finder — {msg}")
+        sys.exit(0)
+
+    # Phase 2: Pyrogram get_chat()으로 실제 그룹 정보 검증
+    print("[Phase 2] Pyrogram get_chat()으로 그룹 검증 중...\n")
     total_new = 0
     total_dup = 0
     seen_ids: set[int] = set()
@@ -207,38 +330,24 @@ async def main() -> None:
         me = await client.get_me()
         print(f"✅ Pyrogram 연결: @{me.username or me.id}\n")
 
-        for i, keyword in enumerate(SEARCH_KEYWORDS):
+        groups = await _verify_groups(
+            client,
+            username_candidates[:MAX_GROUPS_PER_RUN * 5],
+            seen_ids,
+            MIN_MEMBER_COUNT,
+        )
+
+        for g in groups:
             if total_new >= MAX_GROUPS_PER_RUN:
-                print(f"⚠️  최대 발굴 수 {MAX_GROUPS_PER_RUN}개 도달 — 검색 중단")
                 break
-
-            remaining = MAX_GROUPS_PER_RUN - total_new
-            per_kw = min(MAX_RESULTS_PER_KEYWORD, remaining * 3)
-
-            print(f"  [{i+1}/{len(SEARCH_KEYWORDS)}] 검색: '{keyword}'")
-            groups = await search_groups_by_keyword(client, keyword, seen_ids, per_kw, MIN_MEMBER_COUNT)
-
-            for g in groups:
-                if total_new >= MAX_GROUPS_PER_RUN:
-                    break
-                is_new = save_discovered_group(
-                    g["id"], g["username"], g["title"], g["member_count"]
-                )
-                if is_new:
-                    total_new += 1
-                    print(
-                        f"    ✅ @{g['username']} (멤버 {g['member_count']:,}명) 저장"
-                    )
-                else:
-                    total_dup += 1
-
-            print(
-                f"    📊 이번 키워드: +{len(groups)}개 발견 "
-                f"(누적 신규={total_new} / 중복={total_dup})"
+            is_new = save_discovered_group(
+                g["id"], g["username"], g["title"], g["member_count"]
             )
-
-            if i < len(SEARCH_KEYWORDS) - 1:
-                await asyncio.sleep(KEYWORD_DELAY_SEC)
+            if is_new:
+                total_new += 1
+                print(f"  ✅ @{g['username']} (멤버 {g['member_count']:,}명) 저장")
+            else:
+                total_dup += 1
 
     stats = count_discovered_groups()
     summary = (

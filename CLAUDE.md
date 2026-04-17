@@ -1,7 +1,7 @@
 # CLAUDE.md — 프로젝트 참조 문서
 
 이 파일은 Claude Code가 이 프로젝트를 작업할 때 반드시 먼저 읽어야 한다.
-마지막 갱신: 2026-04-16
+마지막 갱신: 2026-04-17
 
 ---
 
@@ -16,7 +16,7 @@
 | 배포 | Railway (단일 서비스) |
 | 런타임 | Python 3.11 (runtime.txt) |
 | 웹 서버 | FastAPI + uvicorn |
-| 봇 프레임워크 | python-telegram-bot (Bot API) + Pyrogram 2.0.106 (MTProto UserBot) |
+| 봇 프레임워크 | python-telegram-bot (Bot API) + Pyrogram 2.0.106 (DM 발송) + Telethon (멤버 수집) |
 | DB | Railway PostgreSQL |
 | 스케줄러 | APScheduler (BackgroundScheduler) |
 
@@ -65,7 +65,8 @@ my-bot/
 │   └── subscribe_bot.py     # 구독봇 전체 (메인 봇)
 │
 ├── scripts/
-│   ├── generate_session.py  # Pyrogram SESSION_STRING 생성 (로컬 실행 전용)
+│   ├── generate_session.py         # Pyrogram SESSION_STRING 생성 (로컬 실행 전용)
+│   ├── generate_telethon_session.py # Telethon SESSION_STRING_TELETHON 생성 (로컬 실행 전용)
 │   ├── group_finder.py      # 그룹 발굴 (스케줄: 03:00 UTC)
 │   ├── member_scraper.py    # 멤버 수집 (스케줄: 00:00 UTC)
 │   ├── dm_campaign_runner.py # DM 발송 실행 (스케줄: 비활성화 중)
@@ -142,8 +143,10 @@ BOT_TOKEN (필수) — 관리봇 토큰
 SUBSCRIBE_BOT_TOKEN (필수) — 구독봇 토큰
 API_ID (필수) — Telegram App API ID
 API_HASH (필수) — Telegram App API Hash
-SESSION_STRING_1~10 (최소 1개 필수) — Pyrogram StringSession
+SESSION_STRING_1~10 (최소 1개 필수) — Pyrogram StringSession (DM 발송용)
 SESSION_STRING — _1~_10 없을 때 fallback
+SESSION_STRING_TELETHON (필수) — Telethon StringSession (멤버 수집용)
+BRIGHTDATA_API_TOKEN (필수) — Bright Data SERP API 토큰 (그룹 발굴용)
 DATABASE_URL (필수) — PostgreSQL 연결 URL
 ADMIN_ID (필수) — 관리자 Telegram user_id (정수)
 CHANNEL_ID — 채널 ID (구독봇용)
@@ -226,8 +229,15 @@ file_id 캐싱:
 
 ## 13. SESSION_STRING 생성
 
-python scripts/generate_session.py  (로컬 실행, 전화번호 입력 필요)
-출력된 문자열을 Railway 환경변수 SESSION_STRING_1~10에 등록.
+Pyrogram (DM 발송용):
+  python scripts/generate_session.py  (로컬 실행, 전화번호 입력 필요)
+  출력된 문자열을 Railway 환경변수 SESSION_STRING_1~10에 등록.
+
+Telethon (멤버 수집용):
+  python scripts/generate_telethon_session.py  (로컬 실행, 전화번호 입력 필요)
+  출력된 문자열을 Railway 환경변수 SESSION_STRING_TELETHON에 등록.
+
+주의: Pyrogram StringSession ≠ Telethon StringSession — 포맷이 다르므로 혼용 불가.
 
 ---
 

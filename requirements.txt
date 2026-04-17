@@ -3,6 +3,7 @@ uvicorn
 python-telegram-bot[job-queue]
 pyrogram==2.0.106
 cryptg
+telethon
 psycopg2-binary
 APScheduler
 httpx
@@ -10,3 +11,4 @@ python-dotenv
 beautifulsoup4
 lxml
 google-generativeai
+scrapling[fetchers]
