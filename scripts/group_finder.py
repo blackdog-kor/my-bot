@@ -44,21 +44,21 @@ MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
-    "cassino brasil",
-    "fortune tiger grupo",
-    "tigrinho apostas",
-    "aviator brasil",
-    "1win brasil",
-    "apostas esportivas grupo",
-    "crypto cassino brasil",
+    "cassino brasil grupo",
+    "fortune tiger grupo telegram",
+    "tigrinho chat brasil",
+    "apostas grupo telegram brasil",
+    "aviator grupo brasil",
+    "1win grupo telegram brasil",
     "betano grupo telegram",
-    "stake brasil telegram",
-    "bonus cassino telegram",
-    "cassino online brasil",
-    "slots brasil grupo",
-    "gates of olympus telegram",
-    "crash game brasil",
-    "bitcoin cassino grupo",
+    "slots grupo brasil telegram",
+    "crash game grupo brasil",
+    "cassino online grupo telegram",
+    "bitcoin cassino grupo brasil",
+    "stake grupo brasil telegram",
+    "bonus cassino grupo telegram",
+    "deposito bonus grupo brasil",
+    "cassino vip grupo telegram",
 ]
 _kw_env = os.getenv("SEARCH_KEYWORDS", "").strip()
 SEARCH_KEYWORDS: list[str] = (
@@ -211,12 +211,15 @@ async def _verify_groups(
 ) -> list[dict]:
     """
     Pyrogram get_chat()으로 각 username을 검증.
+    SUPERGROUP / GROUP만 저장, CHANNEL 제외.
     반환: [{"id", "username", "title", "member_count"}, ...]
     """
+    from pyrogram.enums import ChatType
     from pyrogram.errors import FloodWait
 
+    valid_types = {ChatType.SUPERGROUP, ChatType.GROUP}
     results: list[dict] = []
-    no_username = low_members = fail_count = 0
+    no_username = low_members = fail_count = wrong_type = 0
 
     for uname in usernames:
         try:
@@ -240,6 +243,13 @@ async def _verify_groups(
         if not chat_id or chat_id in seen_ids:
             continue
 
+        # 채널 제외 — 그룹/슈퍼그룹만 수집
+        chat_type = getattr(full, "type", None)
+        if chat_type not in valid_types:
+            wrong_type += 1
+            print(f"    ⏭️  @{uname} 제외 (type={chat_type})")
+            continue
+
         actual_username = getattr(full, "username", None) or ""
         if not actual_username:
             no_username += 1
@@ -260,8 +270,8 @@ async def _verify_groups(
         await asyncio.sleep(0.4)
 
     print(
-        f"    ✅ get_chat_fail={fail_count} / no_username={no_username} "
-        f"/ low_members={low_members} / 최종={len(results)}"
+        f"    ✅ get_chat_fail={fail_count} / wrong_type={wrong_type} "
+        f"/ no_username={no_username} / low_members={low_members} / 최종={len(results)}"
     )
     return results
 
