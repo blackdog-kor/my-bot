@@ -18,7 +18,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, quote_plus, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -44,21 +44,21 @@ MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
-    "site:t.me cassino brasil",
-    "site:t.me fortune tiger grupo",
-    "site:t.me tigrinho apostas",
-    "site:t.me aviator brasil",
-    "site:t.me 1win brasil",
-    "site:t.me apostas esportivas grupo",
-    "site:t.me crypto cassino brasil",
-    "site:t.me betano grupo telegram",
-    "site:t.me stake brasil telegram",
-    "site:t.me bonus cassino telegram",
-    "site:t.me cassino online brasil",
-    "site:t.me slots brasil grupo",
-    "site:t.me gates of olympus telegram",
-    "site:t.me crash game brasil",
-    "site:t.me bitcoin cassino grupo",
+    "cassino brasil",
+    "fortune tiger grupo",
+    "tigrinho apostas",
+    "aviator brasil",
+    "1win brasil",
+    "apostas esportivas grupo",
+    "crypto cassino brasil",
+    "betano grupo telegram",
+    "stake brasil telegram",
+    "bonus cassino telegram",
+    "cassino online brasil",
+    "slots brasil grupo",
+    "gates of olympus telegram",
+    "crash game brasil",
+    "bitcoin cassino grupo",
 ]
 _kw_env = os.getenv("SEARCH_KEYWORDS", "").strip()
 SEARCH_KEYWORDS: list[str] = (
@@ -97,18 +97,26 @@ _TME_RE = re.compile(r"(?:https?://)?t\.me/[A-Za-z0-9_@+/]+")
 
 
 def _extract_tme_from_html(html: str) -> list[str]:
-    """HTML에서 t.me URL 추출 (https://, http://, 프로토콜 없는 형태 모두 커버)."""
+    """
+    HTML에서 t.me URL 추출.
+    1단계: BeautifulSoup으로 <a href> 파싱 (https://, http://, t.me/ 모두 커버)
+    2단계: 정규식으로 텍스트 전체 스캔 (fallback)
+    """
     found: list[str] = []
+
+    # 1단계: BeautifulSoup href 파싱
     try:
         soup = BeautifulSoup(html, "lxml")
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if "t.me/" in href:
-                found.append(href)
+        links = soup.find_all("a", href=True)
+        t_me_urls = [a["href"] for a in links if "t.me/" in a["href"]]
+        found.extend(t_me_urls)
     except Exception:
         pass
+
+    # 2단계: 정규식 스캔 (https?:// 없는 순수 t.me/ 형태도 포함)
     for match in _TME_RE.findall(html):
         found.append(match)
+
     return found
 
 
@@ -120,9 +128,10 @@ def _search_brightdata(query: str) -> list[str]:
     if not BRIGHTDATA_API_TOKEN:
         return []
 
+    # site:t.me 는 URL에 하드코딩 (quote()로 인코딩하면 %3A로 변환돼 연산자 인식 안 됨)
     google_url = (
         f"https://www.google.com/search"
-        f"?q={quote(query)}&num=20&gl=br&hl=pt-BR"
+        f"?q=site:t.me+{quote_plus(query)}&num=20&gl=br&hl=pt-BR"
     )
 
     try:
