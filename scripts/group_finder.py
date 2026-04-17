@@ -277,36 +277,84 @@ async def _verify_groups(
     return results
 
 
-async def _get_linked_group(client, chat_id: int) -> dict | None:
+async def _run_phase3_telethon(
+    channels: list[dict],
+    seen_ids: set[int],
+    save_fn,
+    max_new: int,
+) -> tuple[int, int, int]:
     """
-    Pyrogram raw API로 채널의 linked_chat_id를 조회하고
-    연결된 토론 그룹 정보를 반환. 없거나 실패 시 None.
+    Telethon으로 채널의 연결된 토론 그룹(linked_chat_id)을 조회해서 저장.
+    반환: (new, dup, none)
     """
-    from pyrogram import raw
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+    from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
 
-    try:
-        peer = await client.resolve_peer(chat_id)
-        full = await client.invoke(
-            raw.functions.channels.GetFullChannel(channel=peer)
-        )
-        linked_id = getattr(full.full_chat, "linked_chat_id", None)
-        if not linked_id:
-            return None
+    session_str = (os.getenv("SESSION_STRING_TELETHON") or "").strip()
+    if not session_str:
+        print("    ⚠️ SESSION_STRING_TELETHON 없음 — Phase 3 건너뜀")
+        return 0, 0, len(channels)
 
-        linked_chat = await client.get_chat(linked_id)
-        username = getattr(linked_chat, "username", None) or ""
-        if not username:
-            return None
+    new = dup = none = 0
 
-        return {
-            "id":           linked_id,
-            "username":     username,
-            "title":        getattr(linked_chat, "title", "") or "",
-            "member_count": getattr(linked_chat, "members_count", 0) or 0,
-        }
-    except Exception as e:
-        print(f"      ⚠️ GetFullChannel 실패 (id={chat_id}): {type(e).__name__} — {e}")
-        return None
+    async with TelegramClient(StringSession(session_str), API_ID, API_HASH) as tg:
+        me = await tg.get_me()
+        print(f"✅ Telethon 연결: @{me.username or me.id}\n")
+
+        for g in channels:
+            if new >= max_new:
+                print(f"⚠️  최대 발굴 수 도달 — Phase 3 중단")
+                break
+
+            uname = g["username"]
+            try:
+                # 채널 join (권한 확보)
+                try:
+                    await tg(JoinChannelRequest(f"@{uname}"))
+                    await asyncio.sleep(1.0)
+                except Exception:
+                    pass
+
+                full = await tg(GetFullChannelRequest(f"@{uname}"))
+                linked_id = getattr(full.full_chat, "linked_chat_id", None)
+
+                if not linked_id:
+                    none += 1
+                    print(f"    ℹ️  @{uname} — 연결된 토론 그룹 없음")
+                    continue
+
+                if linked_id in seen_ids:
+                    dup += 1
+                    continue
+
+                entity = await tg.get_entity(linked_id)
+                linked_username = (getattr(entity, "username", None) or "").strip()
+                if not linked_username:
+                    none += 1
+                    print(f"    ℹ️  @{uname} 토론 그룹 (id={linked_id}) — username 없음")
+                    continue
+
+                linked_title   = getattr(entity, "title", "") or ""
+                linked_members = getattr(entity, "participants_count", 0) or 0
+
+                seen_ids.add(linked_id)
+                is_new = save_fn(linked_id, linked_username, linked_title, linked_members)
+                if is_new:
+                    new += 1
+                    print(
+                        f"  ✅ [Phase 3] @{linked_username} "
+                        f"(채널 @{uname}의 토론 그룹, 멤버 {linked_members:,}명) 저장"
+                    )
+                else:
+                    dup += 1
+
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                print(f"    ⚠️ @{uname} Phase 3 실패: {type(e).__name__} — {e}")
+
+    return new, dup, none
 
 
 async def main() -> None:
@@ -418,42 +466,25 @@ async def main() -> None:
             else:
                 total_dup += 1
 
-        # Phase 3: 채널의 연결된 토론 그룹 추가 발굴
-        from pyrogram.enums import ChatType
-        channels = [g for g in groups if g.get("chat_type") == ChatType.CHANNEL]
-        print(f"\n[Phase 3] 채널 {len(channels)}개에서 연결된 토론 그룹 조회 중...\n")
-        phase3_new = phase3_dup = phase3_none = 0
+    # Phase 3: Telethon으로 채널의 연결된 토론 그룹 추가 발굴 (Pyrogram 블록 밖)
+    from pyrogram.enums import ChatType
+    channels = [g for g in groups if g.get("chat_type") == ChatType.CHANNEL]
+    print(f"\n[Phase 3] Telethon — 채널 {len(channels)}개에서 연결된 토론 그룹 조회 중...\n")
 
-        for g in channels:
-            if total_new >= MAX_GROUPS_PER_RUN:
-                print(f"⚠️  최대 발굴 수 {MAX_GROUPS_PER_RUN}개 도달 — Phase 3 중단")
-                break
-            linked = await _get_linked_group(client, g["id"])
-            if not linked:
-                phase3_none += 1
-                print(f"    ℹ️  @{g['username']} — 연결된 토론 그룹 없음")
-                continue
-            if linked["id"] in seen_ids:
-                phase3_dup += 1
-                continue
-            seen_ids.add(linked["id"])
-            is_new = save_discovered_group(
-                linked["id"], linked["username"], linked["title"], linked["member_count"]
-            )
-            if is_new:
-                total_new += 1
-                phase3_new += 1
-                print(
-                    f"  ✅ [Phase 3] @{linked['username']} "
-                    f"(채널 @{g['username']}의 토론 그룹, 멤버 {linked['member_count']:,}명) 저장"
-                )
-            else:
-                phase3_dup += 1
-            await asyncio.sleep(0.5)
-
-        print(
-            f"\n  📊 Phase 3: 신규 {phase3_new}개 / 중복 {phase3_dup}개 / 토론 그룹 없음 {phase3_none}개"
+    phase3_new = phase3_dup = phase3_none = 0
+    if channels:
+        phase3_new, phase3_dup, phase3_none = await _run_phase3_telethon(
+            channels,
+            seen_ids,
+            save_discovered_group,
+            MAX_GROUPS_PER_RUN - total_new,
         )
+        total_new += phase3_new
+        total_dup += phase3_dup
+
+    print(
+        f"\n  📊 Phase 3: 신규 {phase3_new}개 / 중복 {phase3_dup}개 / 토론 그룹 없음 {phase3_none}개"
+    )
 
     stats = count_discovered_groups()
     summary = (
