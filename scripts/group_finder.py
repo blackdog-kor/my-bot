@@ -93,8 +93,11 @@ def _get_session() -> tuple[str, str] | None:
     return None
 
 
+_TME_RE = re.compile(r"(?:https?://)?t\.me/[A-Za-z0-9_@+/]+")
+
+
 def _extract_tme_from_html(html: str) -> list[str]:
-    """HTML에서 t.me URL 추출."""
+    """HTML에서 t.me URL 추출 (https://, http://, 프로토콜 없는 형태 모두 커버)."""
     found: list[str] = []
     try:
         soup = BeautifulSoup(html, "lxml")
@@ -104,7 +107,7 @@ def _extract_tme_from_html(html: str) -> list[str]:
                 found.append(href)
     except Exception:
         pass
-    for match in re.findall(r"https?://t\.me/[A-Za-z0-9_@+/]+", html):
+    for match in _TME_RE.findall(html):
         found.append(match)
     return found
 
@@ -141,8 +144,10 @@ def _search_brightdata(query: str) -> list[str]:
         print(f"    ⚠️ Bright Data HTTP {resp.status_code}: {resp.text[:300]}")
         return []
 
-    urls: list[str] = []
     content_type = resp.headers.get("content-type", "")
+    print(f"    📡 응답 status={resp.status_code} content-type={content_type} len={len(resp.text)}")
+
+    urls: list[str] = []
 
     if "json" in content_type:
         try:
@@ -153,19 +158,29 @@ def _search_brightdata(query: str) -> list[str]:
                     urls.append(link)
                 for field in ("snippet", "description", "title"):
                     text = item.get(field) or ""
-                    urls.extend(re.findall(r"https?://t\.me/[A-Za-z0-9_@+/]+", text))
+                    urls.extend(_TME_RE.findall(text))
         except Exception:
             pass
 
     if not urls:
         urls = _extract_tme_from_html(resp.text)
 
+    # ── 디버그: 추출된 URL 전체 출력 ─────────────────────────────
+    if urls:
+        print(f"    🔗 추출된 t.me URL {len(urls)}개:")
+        for u in urls:
+            print(f"      {u}")
+    else:
+        print(f"    🔗 추출된 t.me URL 없음 (응답 앞부분): {resp.text[:400]}")
+
     return urls
 
 
 def _tme_url_to_username(url: str) -> str | None:
-    """t.me URL → @username. 초대링크(+, joinchat) 는 None."""
+    """t.me URL → username. 초대링크(+, joinchat) 는 None. 프로토콜 없는 형태도 처리."""
     try:
+        if not url.startswith("http"):
+            url = "https://" + url.lstrip("/")
         path = urlparse(url).path.lstrip("/")
     except Exception:
         return None
