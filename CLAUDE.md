@@ -261,6 +261,11 @@ Telethon (멤버 수집용):
 코드 수정 승인: Claude Code에서 "Yes, and don't ask again"
 테스트 순서: /debug/session-test → /debug/dm-test → 구독봇 1명 테스트 → 전체 발송
 
+### Git 자동화 규칙 (필수 준수)
+- 모든 작업은 main 브랜치에 직접 커밋·푸시한다. feature 브랜치·PR 생성 금지.
+- 작업 완료 즉시 git add → git commit → git push origin main 순서로 자동 실행.
+- Railway가 main push를 감지해 자동 배포한다. 별도 배포 조작 불필요.
+
 ---
 
 ## 16. 개발 방향 원칙
