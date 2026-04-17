@@ -112,27 +112,66 @@ app = FastAPI(lifespan=lifespan)
 _RAILWAY_PROXY_SECRET = os.getenv("RAILWAY_PROXY_SECRET", "").strip()
 
 
-@app.middleware("http")
-async def _mcp_auth(request: Request, call_next):
-    if request.url.path.startswith("/railway-mcp"):
-        if _RAILWAY_PROXY_SECRET:
-            auth = request.headers.get("Authorization", "")
-            if auth != f"Bearer {_RAILWAY_PROXY_SECRET}":
-                return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    return await call_next(request)
-
-
-try:
-    from app.railway_mcp_server import mcp as _railway_mcp
-    app.mount("/railway-mcp", _railway_mcp.streamable_http_app())
-    logger.info("Railway MCP 서버 마운트 완료 → /railway-mcp/mcp")
-except Exception as _e:
-    logger.warning("Railway MCP 서버 마운트 실패: %s", _e)
+def _check_mcp_auth(request: Request) -> bool:
+    if not _RAILWAY_PROXY_SECRET:
+        return True
+    return request.headers.get("Authorization", "") == f"Bearer {_RAILWAY_PROXY_SECRET}"
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/railway-mcp/mcp")
+async def railway_mcp_endpoint(request: Request):
+    """MCP Streamable HTTP 엔드포인트 — Railway 관리 도구 프록시."""
+    if not _check_mcp_auth(request):
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32001, "message": "Unauthorized"}, "id": None}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None})
+
+    method = body.get("method", "")
+    req_id = body.get("id")
+
+    if method == "initialize":
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "Railway Manager", "version": "1.0.0"},
+            },
+            "id": req_id,
+        })
+
+    if method == "notifications/initialized":
+        return JSONResponse({"jsonrpc": "2.0", "result": {}, "id": req_id})
+
+    if method == "tools/list":
+        from app.railway_mcp_server import TOOLS
+        return JSONResponse({"jsonrpc": "2.0", "result": {"tools": TOOLS}, "id": req_id})
+
+    if method == "tools/call":
+        from app.railway_mcp_server import call_tool
+        params = body.get("params", {})
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+        result_text = await call_tool(tool_name, arguments)
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "result": {"content": [{"type": "text", "text": result_text}]},
+            "id": req_id,
+        })
+
+    return JSONResponse({
+        "jsonrpc": "2.0",
+        "error": {"code": -32601, "message": f"Method not found: {method}"},
+        "id": req_id,
+    })
 
 
 @app.get("/railway-mcp-info")
