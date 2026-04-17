@@ -266,6 +266,7 @@ async def _verify_groups(
             "username":     actual_username,
             "title":        getattr(full, "title", "") or uname,
             "member_count": member_count,
+            "chat_type":    chat_type,
         })
         await asyncio.sleep(0.4)
 
@@ -274,6 +275,38 @@ async def _verify_groups(
         f"/ no_username={no_username} / low_members={low_members} / 최종={len(results)}"
     )
     return results
+
+
+async def _get_linked_group(client, chat_id: int) -> dict | None:
+    """
+    Pyrogram raw API로 채널의 linked_chat_id를 조회하고
+    연결된 토론 그룹 정보를 반환. 없거나 실패 시 None.
+    """
+    from pyrogram import raw
+
+    try:
+        peer = await client.resolve_peer(chat_id)
+        full = await client.invoke(
+            raw.functions.channels.GetFullChannel(channel=peer)
+        )
+        linked_id = getattr(full.full_chat, "linked_chat_id", None)
+        if not linked_id:
+            return None
+
+        linked_chat = await client.get_chat(linked_id)
+        username = getattr(linked_chat, "username", None) or ""
+        if not username:
+            return None
+
+        return {
+            "id":           linked_id,
+            "username":     username,
+            "title":        getattr(linked_chat, "title", "") or "",
+            "member_count": getattr(linked_chat, "members_count", 0) or 0,
+        }
+    except Exception as e:
+        print(f"      ⚠️ GetFullChannel 실패 (id={chat_id}): {type(e).__name__} — {e}")
+        return None
 
 
 async def main() -> None:
@@ -372,6 +405,7 @@ async def main() -> None:
             MIN_MEMBER_COUNT,
         )
 
+        # Phase 2 저장
         for g in groups:
             if total_new >= MAX_GROUPS_PER_RUN:
                 break
@@ -380,9 +414,46 @@ async def main() -> None:
             )
             if is_new:
                 total_new += 1
-                print(f"  ✅ @{g['username']} (멤버 {g['member_count']:,}명) 저장")
+                print(f"  ✅ @{g['username']} (멤버 {g['member_count']:,}명, type={g['chat_type']}) 저장")
             else:
                 total_dup += 1
+
+        # Phase 3: 채널의 연결된 토론 그룹 추가 발굴
+        from pyrogram.enums import ChatType
+        channels = [g for g in groups if g.get("chat_type") == ChatType.CHANNEL]
+        print(f"\n[Phase 3] 채널 {len(channels)}개에서 연결된 토론 그룹 조회 중...\n")
+        phase3_new = phase3_dup = phase3_none = 0
+
+        for g in channels:
+            if total_new >= MAX_GROUPS_PER_RUN:
+                print(f"⚠️  최대 발굴 수 {MAX_GROUPS_PER_RUN}개 도달 — Phase 3 중단")
+                break
+            linked = await _get_linked_group(client, g["id"])
+            if not linked:
+                phase3_none += 1
+                print(f"    ℹ️  @{g['username']} — 연결된 토론 그룹 없음")
+                continue
+            if linked["id"] in seen_ids:
+                phase3_dup += 1
+                continue
+            seen_ids.add(linked["id"])
+            is_new = save_discovered_group(
+                linked["id"], linked["username"], linked["title"], linked["member_count"]
+            )
+            if is_new:
+                total_new += 1
+                phase3_new += 1
+                print(
+                    f"  ✅ [Phase 3] @{linked['username']} "
+                    f"(채널 @{g['username']}의 토론 그룹, 멤버 {linked['member_count']:,}명) 저장"
+                )
+            else:
+                phase3_dup += 1
+            await asyncio.sleep(0.5)
+
+        print(
+            f"\n  📊 Phase 3: 신규 {phase3_new}개 / 중복 {phase3_dup}개 / 토론 그룹 없음 {phase3_none}개"
+        )
 
     stats = count_discovered_groups()
     summary = (

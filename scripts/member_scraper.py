@@ -218,7 +218,17 @@ async def scrape_channel_telethon(client, handle: str) -> tuple[int, int]:
         linked_chat_id = getattr(full_chat.full_chat, "linked_chat_id", None)
 
         if linked_chat_id:
-            print(f"    🔗 [{handle}] 연결된 토론 그룹 발견 (id={linked_chat_id}) — iter_participants 실행")
+            print(f"    🔗 [{handle}] 연결된 토론 그룹 발견 (id={linked_chat_id})")
+            # Telethon 계정을 토론 그룹에 직접 join — iter_participants 권한 확보
+            try:
+                from telethon.tl.functions.channels import JoinChannelRequest
+                await client(JoinChannelRequest(linked_chat_id))
+                print(f"    ➕ [{handle}] 토론 그룹 join 완료")
+                await asyncio.sleep(2.0)
+            except Exception as je:
+                print(f"    ℹ️  [{handle}] 토론 그룹 join: {type(je).__name__} — {je}")
+
+            print(f"    ▶️  iter_participants 실행...")
             count = 0
             async for member in client.iter_participants(linked_chat_id, limit=MAX_MEMBERS_PER_GROUP):
                 if getattr(member, "bot", False) or getattr(member, "deleted", False):
