@@ -131,7 +131,7 @@ def _search_brightdata(query: str) -> list[str]:
                     "Content-Type": "application/json",
                 },
                 json={"zone": "serp", "url": google_url, "format": "raw",
-                      "country": "BR", "lang": "pt-BR"},
+                      "country": "BR"},
             )
     except Exception as e:
         print(f"    ⚠️ Bright Data 요청 실패: {type(e).__name__} — {e}")
