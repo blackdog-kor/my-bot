@@ -211,13 +211,13 @@ async def _verify_groups(
 ) -> list[dict]:
     """
     Pyrogram get_chat()으로 각 username을 검증.
-    SUPERGROUP / GROUP만 저장, CHANNEL 제외.
+    SUPERGROUP / GROUP / CHANNEL 모두 저장 (채널은 member_scraper에서 댓글 작성자 수집).
     반환: [{"id", "username", "title", "member_count"}, ...]
     """
     from pyrogram.enums import ChatType
     from pyrogram.errors import FloodWait
 
-    valid_types = {ChatType.SUPERGROUP, ChatType.GROUP}
+    valid_types = {ChatType.SUPERGROUP, ChatType.GROUP, ChatType.CHANNEL}
     results: list[dict] = []
     no_username = low_members = fail_count = wrong_type = 0
 
@@ -243,7 +243,7 @@ async def _verify_groups(
         if not chat_id or chat_id in seen_ids:
             continue
 
-        # 채널 제외 — 그룹/슈퍼그룹만 수집
+        # 그룹/슈퍼그룹/채널만 저장 (BOT, PRIVATE 제외)
         chat_type = getattr(full, "type", None)
         if chat_type not in valid_types:
             wrong_type += 1
