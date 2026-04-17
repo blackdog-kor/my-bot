@@ -1,31 +1,15 @@
 """
-Railway MCP 프록시 서버.
-
-Anthropic VM에서 Railway API가 IP 차단(403)되는 문제를 우회하기 위해,
-Railway 위에서 실행되는 이 앱이 대신 Railway API를 호출하는 방식.
-
-Claude.ai/code 웹에서 이 서버를 MCP로 등록하면 Railway 관리가 가능해짐.
-
-필요 환경변수:
-  RAILWAY_API_TOKEN    — Railway 대시보드 > Account Settings > Tokens 에서 발급
-  RAILWAY_PROXY_SECRET — MCP 엔드포인트 보호용 임의 비밀 문자열 (직접 설정)
-
-Railway가 자동 주입하는 변수 (별도 설정 불필요):
-  RAILWAY_PROJECT_ID, RAILWAY_SERVICE_ID, RAILWAY_ENVIRONMENT_ID
+Railway MCP 프록시 — mcp 패키지 없이 MCP HTTP 프로토콜 직접 구현.
 """
 
 import os
-
 import httpx
-from mcp.server.fastmcp import FastMCP
 
 RAILWAY_GQL = "https://backboard.railway.com/graphql/v2"
 
 _DEFAULT_PROJECT_ID = os.getenv("RAILWAY_PROJECT_ID", "")
 _DEFAULT_SERVICE_ID = os.getenv("RAILWAY_SERVICE_ID", "")
 _DEFAULT_ENV_ID = os.getenv("RAILWAY_ENVIRONMENT_ID", "")
-
-mcp = FastMCP("Railway Manager")
 
 
 def _token() -> str:
@@ -40,35 +24,104 @@ async def _gql(query: str, variables: dict | None = None) -> dict:
         resp = await client.post(
             RAILWAY_GQL,
             json={"query": query, "variables": variables or {}},
-            headers={
-                "Authorization": f"Bearer {_token()}",
-                "Content-Type": "application/json",
-            },
+            headers={"Authorization": f"Bearer {_token()}", "Content-Type": "application/json"},
         )
         resp.raise_for_status()
         return resp.json()
 
 
-def _pid(v: str) -> str:
-    return v or _DEFAULT_PROJECT_ID
+def _p(v, d): return v or d
 
 
-def _sid(v: str) -> str:
-    return v or _DEFAULT_SERVICE_ID
+# ── MCP Tool 정의 ────────────────────────────────────────────────
+
+TOOLS = [
+    {
+        "name": "get_project_info",
+        "description": "Railway 프로젝트·서비스·환경 목록을 반환합니다.",
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "list_deployments",
+        "description": "서비스의 최근 배포 목록을 반환합니다. ID 생략 시 현재 서비스 사용.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string", "description": "프로젝트 ID (생략 가능)"},
+                "service_id": {"type": "string", "description": "서비스 ID (생략 가능)"},
+            },
+        },
+    },
+    {
+        "name": "trigger_redeploy",
+        "description": "서비스 재배포를 트리거합니다. ID 생략 시 현재 서비스/환경 사용.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string"},
+                "environment_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "get_deployment_logs",
+        "description": "배포 로그를 가져옵니다.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "deployment_id": {"type": "string"},
+                "log_type": {"type": "string", "enum": ["runtime", "build"], "default": "runtime"},
+            },
+            "required": ["deployment_id"],
+        },
+    },
+    {
+        "name": "list_env_vars",
+        "description": "환경변수 목록을 반환합니다 (값 마스킹).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "service_id": {"type": "string"},
+                "environment_id": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "set_env_var",
+        "description": "환경변수를 생성하거나 업데이트합니다.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "value": {"type": "string"},
+                "project_id": {"type": "string"},
+                "service_id": {"type": "string"},
+                "environment_id": {"type": "string"},
+            },
+            "required": ["name", "value"],
+        },
+    },
+    {
+        "name": "delete_env_var",
+        "description": "환경변수를 삭제합니다.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "project_id": {"type": "string"},
+                "service_id": {"type": "string"},
+                "environment_id": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    },
+]
 
 
-def _eid(v: str) -> str:
-    return v or _DEFAULT_ENV_ID
+# ── Tool 핸들러 ─────────────────────────────────────────────────
 
-
-# ──────────────────────────────────────────────────────────────
-# Tools
-# ──────────────────────────────────────────────────────────────
-
-
-@mcp.tool()
-async def get_project_info() -> str:
-    """현재 계정의 Railway 프로젝트·서비스·환경 목록을 반환합니다."""
+async def _get_project_info(_args: dict) -> str:
     data = await _gql("""
         query {
             me {
@@ -98,20 +151,16 @@ async def get_project_info() -> str:
     return "\n".join(lines) if lines else "프로젝트 없음"
 
 
-@mcp.tool()
-async def list_deployments(project_id: str = "", service_id: str = "") -> str:
-    """서비스의 최근 배포 목록을 반환합니다. ID 생략 시 현재 서비스 사용."""
-    pid = _pid(project_id)
-    sid = _sid(service_id)
+async def _list_deployments(args: dict) -> str:
+    pid = _p(args.get("project_id", ""), _DEFAULT_PROJECT_ID)
+    sid = _p(args.get("service_id", ""), _DEFAULT_SERVICE_ID)
     if not pid or not sid:
-        return "project_id / service_id 가 필요합니다. get_project_info() 로 먼저 확인하세요."
+        return "project_id / service_id 가 필요합니다. get_project_info 로 먼저 확인하세요."
     data = await _gql(
         """
         query D($serviceId: String!, $projectId: String!) {
             deployments(input: { serviceId: $serviceId, projectId: $projectId }, first: 10) {
-                edges {
-                    node { id status createdAt updatedAt }
-                }
+                edges { node { id status createdAt updatedAt } }
             }
         }
         """,
@@ -123,16 +172,13 @@ async def list_deployments(project_id: str = "", service_id: str = "") -> str:
     if not deps:
         return "배포 없음"
     return "\n".join(
-        f"{d['node']['id']}  {d['node']['status']}  생성={d['node']['createdAt']}"
-        for d in deps
+        f"{d['node']['id']}  {d['node']['status']}  {d['node']['createdAt']}" for d in deps
     )
 
 
-@mcp.tool()
-async def trigger_redeploy(service_id: str = "", environment_id: str = "") -> str:
-    """서비스 재배포를 트리거합니다. ID 생략 시 현재 서비스/환경 사용."""
-    sid = _sid(service_id)
-    eid = _eid(environment_id)
+async def _trigger_redeploy(args: dict) -> str:
+    sid = _p(args.get("service_id", ""), _DEFAULT_SERVICE_ID)
+    eid = _p(args.get("environment_id", ""), _DEFAULT_ENV_ID)
     if not sid or not eid:
         return "service_id / environment_id 가 필요합니다."
     data = await _gql(
@@ -148,23 +194,18 @@ async def trigger_redeploy(service_id: str = "", environment_id: str = "") -> st
     return "재배포 트리거 성공"
 
 
-@mcp.tool()
-async def get_deployment_logs(deployment_id: str, log_type: str = "runtime") -> str:
-    """배포 로그를 가져옵니다. log_type: 'runtime'(기본) 또는 'build'"""
-    field = "deploymentLogs" if log_type == "runtime" else "buildLogs"
+async def _get_deployment_logs(args: dict) -> str:
+    dep_id = args.get("deployment_id", "")
+    if not dep_id:
+        return "deployment_id 가 필요합니다."
+    field = "deploymentLogs" if args.get("log_type", "runtime") == "runtime" else "buildLogs"
     data = await _gql(
-        f"""
-        query L($deploymentId: String!) {{
-            {field}(deploymentId: $deploymentId) {{
-                timestamp message severity
-            }}
-        }}
-        """,
-        {"deploymentId": deployment_id},
+        f"query L($d: String!) {{ {field}(deploymentId: $d) {{ timestamp message severity }} }}",
+        {"d": dep_id},
     )
     if "errors" in data:
         return f"오류: {data['errors']}"
-    logs = data.get("data", {}).get(field, []) or []
+    logs = data.get("data", {}).get(field) or []
     if not logs:
         return "로그 없음"
     return "\n".join(
@@ -173,25 +214,15 @@ async def get_deployment_logs(deployment_id: str, log_type: str = "runtime") -> 
     )
 
 
-@mcp.tool()
-async def list_env_vars(
-    project_id: str = "",
-    service_id: str = "",
-    environment_id: str = "",
-) -> str:
-    """환경변수 목록을 반환합니다. 값은 앞뒤 일부만 노출됩니다."""
-    pid = _pid(project_id)
-    sid = _sid(service_id)
-    eid = _eid(environment_id)
+async def _list_env_vars(args: dict) -> str:
+    pid = _p(args.get("project_id", ""), _DEFAULT_PROJECT_ID)
+    sid = _p(args.get("service_id", ""), _DEFAULT_SERVICE_ID)
+    eid = _p(args.get("environment_id", ""), _DEFAULT_ENV_ID)
     if not pid or not eid:
         return "project_id / environment_id 가 필요합니다."
     data = await _gql(
-        """
-        query V($projectId: String!, $environmentId: String!, $serviceId: String) {
-            variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId)
-        }
-        """,
-        {"projectId": pid, "environmentId": eid, "serviceId": sid or None},
+        "query V($p: String!, $e: String!, $s: String) { variables(projectId: $p, environmentId: $e, serviceId: $s) }",
+        {"p": pid, "e": eid, "s": sid or None},
     )
     if "errors" in data:
         return f"오류: {data['errors']}"
@@ -205,63 +236,63 @@ async def list_env_vars(
     return "\n".join(lines)
 
 
-@mcp.tool()
-async def set_env_var(
-    name: str,
-    value: str,
-    project_id: str = "",
-    service_id: str = "",
-    environment_id: str = "",
-) -> str:
-    """환경변수를 생성하거나 업데이트합니다."""
-    pid = _pid(project_id)
-    sid = _sid(service_id)
-    eid = _eid(environment_id)
-    if not pid or not eid:
-        return "project_id / environment_id 가 필요합니다."
+async def _set_env_var(args: dict) -> str:
+    name = args.get("name", "")
+    value = args.get("value", "")
+    pid = _p(args.get("project_id", ""), _DEFAULT_PROJECT_ID)
+    sid = _p(args.get("service_id", ""), _DEFAULT_SERVICE_ID)
+    eid = _p(args.get("environment_id", ""), _DEFAULT_ENV_ID)
+    if not name or not pid or not eid:
+        return "name / project_id / environment_id 가 필요합니다."
     data = await _gql(
         """
-        mutation U($projectId: String!, $environmentId: String!, $serviceId: String,
-                   $name: String!, $value: String!) {
-            variableUpsert(input: {
-                projectId: $projectId, environmentId: $environmentId,
-                serviceId: $serviceId, name: $name, value: $value
-            })
+        mutation U($p: String!, $e: String!, $s: String, $n: String!, $v: String!) {
+            variableUpsert(input: { projectId: $p, environmentId: $e, serviceId: $s, name: $n, value: $v })
         }
         """,
-        {"projectId": pid, "environmentId": eid, "serviceId": sid or None,
-         "name": name, "value": value},
+        {"p": pid, "e": eid, "s": sid or None, "n": name, "v": value},
     )
     if "errors" in data:
         return f"오류: {data['errors']}"
     return f"'{name}' 설정 완료 (재배포 필요)"
 
 
-@mcp.tool()
-async def delete_env_var(
-    name: str,
-    project_id: str = "",
-    service_id: str = "",
-    environment_id: str = "",
-) -> str:
-    """환경변수를 삭제합니다."""
-    pid = _pid(project_id)
-    sid = _sid(service_id)
-    eid = _eid(environment_id)
-    if not pid or not sid or not eid:
-        return "project_id / service_id / environment_id 가 모두 필요합니다."
+async def _delete_env_var(args: dict) -> str:
+    name = args.get("name", "")
+    pid = _p(args.get("project_id", ""), _DEFAULT_PROJECT_ID)
+    sid = _p(args.get("service_id", ""), _DEFAULT_SERVICE_ID)
+    eid = _p(args.get("environment_id", ""), _DEFAULT_ENV_ID)
+    if not name or not pid or not sid or not eid:
+        return "name / project_id / service_id / environment_id 가 모두 필요합니다."
     data = await _gql(
         """
-        mutation Del($projectId: String!, $environmentId: String!,
-                     $serviceId: String!, $name: String!) {
-            variableDelete(input: {
-                projectId: $projectId, environmentId: $environmentId,
-                serviceId: $serviceId, name: $name
-            })
+        mutation Del($p: String!, $e: String!, $s: String!, $n: String!) {
+            variableDelete(input: { projectId: $p, environmentId: $e, serviceId: $s, name: $n })
         }
         """,
-        {"projectId": pid, "environmentId": eid, "serviceId": sid, "name": name},
+        {"p": pid, "e": eid, "s": sid, "n": name},
     )
     if "errors" in data:
         return f"오류: {data['errors']}"
     return f"'{name}' 삭제 완료"
+
+
+_HANDLERS = {
+    "get_project_info": _get_project_info,
+    "list_deployments": _list_deployments,
+    "trigger_redeploy": _trigger_redeploy,
+    "get_deployment_logs": _get_deployment_logs,
+    "list_env_vars": _list_env_vars,
+    "set_env_var": _set_env_var,
+    "delete_env_var": _delete_env_var,
+}
+
+
+async def call_tool(name: str, arguments: dict) -> str:
+    handler = _HANDLERS.get(name)
+    if not handler:
+        return f"알 수 없는 도구: {name}"
+    try:
+        return await handler(arguments)
+    except Exception as exc:
+        return f"오류: {exc}"
