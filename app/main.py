@@ -113,7 +113,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Scheduler thread start failed: %s", e)
 
+    # Agent task queue 시작
+    try:
+        from app.task_queue import queue as agent_queue
+        agent_queue.start()
+        logger.info("Agent task queue started")
+    except Exception as e:
+        logger.warning("Agent task queue start failed: %s", e)
+
     yield
+
+    # Agent task queue 정리
+    try:
+        from app.task_queue import queue as agent_queue
+        agent_queue.stop()
+    except Exception:
+        pass
 
 
 app = FastAPI(lifespan=lifespan)

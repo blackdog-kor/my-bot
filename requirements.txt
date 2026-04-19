@@ -19,3 +19,4 @@ curl_cffi==0.15.0
 crawl4ai==0.8.6
 langchain-openai
 playwright
+openai

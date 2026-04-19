@@ -716,6 +716,12 @@ def build_application() -> Application:
     app = Application.builder().token(SUBSCRIBE_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", admin_command))
+    try:
+        from bot.handlers.agent_cmd import cmd_agent, cmd_agent_status
+        app.add_handler(CommandHandler("agent", cmd_agent))
+        app.add_handler(CommandHandler("agentstatus", cmd_agent_status))
+    except Exception as _e:
+        logger.warning("agent_cmd handlers not loaded: %s", _e)
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(
         MessageHandler(
