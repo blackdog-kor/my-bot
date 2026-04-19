@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-04-19 | 채널 콘텐츠 자동화 시스템 구축
+
+### 💡 결정 사항
+- 채널 성장이 DM 파이프라인보다 선행되어야 함 (유입 퍼널 입구 확대)
+- 콘텐츠 자동화 = 스크래핑 → AI 리라이팅 → 자동 게시 3단계 파이프라인
+- AI: OpenAI GPT-4o-mini 우선 (비용 효율), Gemini Flash 폴백
+- 하루 최대 6개 게시, 피크타임 2회 실행 (14:00 KST, 20:00 KST)
+- 콘텐츠 유형: 빅윈 영상, 게임 팁, 보너스 소식, 카지노 뉴스, 유저 인증
+
+### 🔧 변경 파일 목록
+- `app/content_scraper.py` (신규) — Telethon 기반 소스 채널 콘텐츠 스크래핑
+- `app/content_rewriter.py` (신규) — AI 리라이팅 (OpenAI/Gemini dual)
+- `app/channel_poster.py` (신규) — 채널 자동 게시 + 인라인 버튼
+- `scripts/content_pipeline.py` (신규) — 전체 파이프라인 스크립트
+- `app/pg_broadcast.py` — channel_content 테이블 CRUD 추가
+- `app/scheduler.py` — 콘텐츠 자동화 Job 등록 (05:00, 11:00 UTC)
+- `app/config.py` — 콘텐츠 자동화 설정 추가
+- `TODO.md` — 콘텐츠 자동화 작업 추가
+- `ROADMAP.md` — Phase 2.5 (채널 콘텐츠 자동화) 추가
+
+### 📋 다음 할 일
+- CONTENT_SCRAPE_SOURCES 환경변수에 실제 소스 채널 설정
+- CHANNEL_ID 환경변수 설정
+- /debug/content-test 엔드포인트 추가
+- 콘텐츠 파이프라인 수동 테스트 실행
+- 게시 성과 추적 (조회수 모니터링) 기능 추가
+
+### ⚠️ 주의사항
+- Telethon 세션(SESSION_STRING_TELETHON)이 소스 채널에 접근 가능해야 함
+- 소스 채널이 비공개면 해당 계정으로 먼저 가입 필요
+- 일일 게시 한도(6개) 초과 방지 로직 내장됨
+- AI API 키 없으면 기본 포맷팅만 적용 (graceful degradation)
+
+---
+
 ## 2026-04-19 | 시니어 기술 스택 실제 적용 (structlog + pydantic-settings + tenacity + PostgreSQL MCP)
 
 ### 💡 결정 사항

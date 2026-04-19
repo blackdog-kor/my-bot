@@ -853,3 +853,177 @@ def update_campaign_config(field: str, value: str) -> bool:
     except Exception as e:
         logger.warning("update_campaign_config failed (%s): %s", field, e)
         return False
+
+
+# ─────────────────────────────────────────────
+# channel_content 테이블 (콘텐츠 자동화)
+# ─────────────────────────────────────────────
+
+def ensure_channel_content_table() -> None:
+    """channel_content 테이블 생성."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS channel_content (
+                    id              SERIAL PRIMARY KEY,
+                    original_text   TEXT NOT NULL DEFAULT '',
+                    rewritten_text  TEXT,
+                    media_type      TEXT NOT NULL DEFAULT 'text',
+                    file_id         TEXT,
+                    source_channel  TEXT,
+                    source_msg_id   INTEGER,
+                    source_views    INTEGER DEFAULT 0,
+                    affiliate_url   TEXT,
+                    button_text     TEXT DEFAULT '🎰 지금 플레이하기',
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    posted_at       TIMESTAMPTZ,
+                    created_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("ensure_channel_content_table: OK")
+    except Exception as e:
+        logger.warning("ensure_channel_content_table failed: %s", e)
+
+
+def save_channel_content(
+    original_text: str,
+    rewritten_text: str | None = None,
+    media_type: str = "text",
+    file_id: str | None = None,
+    source_channel: str | None = None,
+    source_msg_id: int | None = None,
+    source_views: int = 0,
+    affiliate_url: str | None = None,
+    button_text: str = "🎰 지금 플레이하기",
+) -> int | None:
+    """채널 콘텐츠 저장. 삽입된 id 반환."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO channel_content
+                    (original_text, rewritten_text, media_type, file_id,
+                     source_channel, source_msg_id, source_views,
+                     affiliate_url, button_text)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (
+                original_text, rewritten_text, media_type, file_id,
+                source_channel, source_msg_id, source_views,
+                affiliate_url, button_text,
+            ))
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            return row[0] if row else None
+    except Exception as e:
+        logger.warning("save_channel_content failed: %s", e)
+        return None
+
+
+def is_content_duplicate(source_channel: str, source_msg_id: int) -> bool:
+    """이미 수집된 콘텐츠인지 확인."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT 1 FROM channel_content
+                WHERE source_channel = %s AND source_msg_id = %s
+                LIMIT 1
+            """, (source_channel, source_msg_id))
+            exists = cur.fetchone() is not None
+            cur.close()
+            return exists
+    except Exception as e:
+        logger.warning("is_content_duplicate failed: %s", e)
+        return False
+
+
+def get_pending_channel_content(limit: int = 5) -> list[dict]:
+    """게시 대기 중인 콘텐츠 반환 (status='pending')."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, original_text, rewritten_text, media_type,
+                       file_id, affiliate_url, button_text
+                FROM channel_content
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
+            cur.close()
+            return [
+                {
+                    "id": r[0], "original_text": r[1],
+                    "rewritten_text": r[2], "media_type": r[3],
+                    "file_id": r[4], "affiliate_url": r[5],
+                    "button_text": r[6],
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        logger.warning("get_pending_channel_content failed: %s", e)
+        return []
+
+
+def mark_content_posted(content_id: int) -> None:
+    """콘텐츠를 게시 완료로 마킹."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE channel_content
+                SET status = 'posted', posted_at = NOW()
+                WHERE id = %s
+            """, (content_id,))
+            conn.commit()
+            cur.close()
+    except Exception as e:
+        logger.warning("mark_content_posted failed: %s", e)
+
+
+def count_today_posted_content() -> int:
+    """오늘 게시된 콘텐츠 수 반환."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COUNT(*) FROM channel_content
+                WHERE status = 'posted'
+                  AND DATE(posted_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
+            """)
+            count = cur.fetchone()[0]
+            cur.close()
+            return count
+    except Exception as e:
+        logger.warning("count_today_posted_content failed: %s", e)
+        return 0
+
+
+def count_channel_content() -> dict:
+    """채널 콘텐츠 현황 반환."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                    COUNT(*) FILTER (WHERE status = 'posted') AS posted
+                FROM channel_content
+            """)
+            row = cur.fetchone()
+            cur.close()
+            return {
+                "total": row[0] or 0,
+                "pending": row[1] or 0,
+                "posted": row[2] or 0,
+            }
+    except Exception as e:
+        logger.warning("count_channel_content failed: %s", e)
+        return {"total": 0, "pending": 0, "posted": 0}

@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     affiliate_webhook_secret: str = ""
     railway_proxy_secret: str = ""
 
+    # ── Content Automation ────────────────────────────────────────
+    content_scrape_sources: str = ""  # comma-separated Telegram channel usernames
+    content_post_interval_hours: int = 4  # hours between auto-posts
+    content_max_daily_posts: int = 6  # max posts per day
+    content_rewrite_enabled: bool = True  # AI rewrite before posting
+    openai_api_key: str = ""  # for content rewriting
+
+    # ── Web Scraping (Layer 1 — zero ban risk) ────────────────────
+    web_scrape_sources: str = ""  # comma-separated extra URLs to scrape
+    web_scrape_enabled: bool = True  # enable external web scraping
+    telegram_scrape_enabled: bool = False  # disable risky Telethon scraping by default
+
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""
 
