@@ -729,6 +729,19 @@ def build_application() -> Application:
         app.add_handler(CommandHandler("refreshtoken", cmd_refreshtoken))
     except Exception as _e:
         logger.warning("token_cmd handlers not loaded: %s", _e)
+    try:
+        from bot.handlers.win1_cmd import (
+            cmd_win1info, cmd_win1links, cmd_win1sources,
+            cmd_win1promo, cmd_win1stats, cmd_win1report,
+        )
+        app.add_handler(CommandHandler("win1info",    cmd_win1info))
+        app.add_handler(CommandHandler("win1links",   cmd_win1links))
+        app.add_handler(CommandHandler("win1sources", cmd_win1sources))
+        app.add_handler(CommandHandler("win1promo",   cmd_win1promo))
+        app.add_handler(CommandHandler("win1stats",   cmd_win1stats))
+        app.add_handler(CommandHandler("win1report",  cmd_win1report))
+    except Exception as _e:
+        logger.warning("win1_cmd handlers not loaded: %s", _e)
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(
         MessageHandler(

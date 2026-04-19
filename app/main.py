@@ -134,7 +134,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 from app.affiliate_tracker import router as affiliate_router  # noqa: E402
+from app.win1_stats_webhook import router as win1_router      # noqa: E402
 app.include_router(affiliate_router)
+app.include_router(win1_router)
 
 # ── Railway MCP 프록시 ──────────────────────────────────────────
 _RAILWAY_PROXY_SECRET = os.getenv("RAILWAY_PROXY_SECRET", "").strip()
