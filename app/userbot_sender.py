@@ -146,7 +146,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential_jitter
     reraise=True,
 )
 async def _download_via_bot_api(bot_token: str, file_id: str) -> tuple[bytes, str]:
-    """Bot API getFile → 파일 bytes + remote_path 반환. 네트워크 오류 시 자동 재시도."""
+    """Bot API getFile → 파일 bytes + remote_path 반환.
+
+    Retries up to 3 times on any exception (network timeout, HTTP 5xx, etc.)
+    with exponential backoff + jitter to handle transient Bot API failures.
+    """
     async with httpx.AsyncClient(timeout=120) as hc:
         r = await hc.get(
             f"https://api.telegram.org/bot{bot_token}/getFile",

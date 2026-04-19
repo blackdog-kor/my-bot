@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]  # repo root (app/scheduler.py)
 _job_lock = threading.Lock()
 
 BOT_TOKEN = settings.bot_token
-ADMIN_ID: int | None = settings.admin_id if settings.admin_id else None
+ADMIN_ID: int | None = settings.admin_id or None
 
 
 def _notify(text: str) -> None:
