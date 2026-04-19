@@ -236,12 +236,26 @@ Telethon (멤버 수집용):
 
 ---
 
-## 15. 개발 워크플로우
+## 15. 개발 워크플로우 (Dual-Agent Collaboration)
 
-개발 환경: GitHub Codespaces + Claude Code
+개발 환경: GitHub Codespaces + Claude Code + GitHub Copilot Agent
 배포: GitHub push → Railway 자동 배포
 코드 수정 승인: Claude Code에서 "Yes, and don't ask again"
 테스트 순서: /debug/session-test → /debug/dm-test → 구독봇 1명 테스트 → 전체 발송
+
+### 에이전트 역할 분담
+
+| Agent | 작업 방식 | 권한 수준 | 주요 용도 |
+|-------|-----------|-----------|-----------|
+| **Claude Code** | main 직접 push | Full (bypassPermissions) | 복잡한 리팩토링, MCP 연동, 멀티파일 변경 |
+| **Copilot Agent** | PR 기반 작업 | Full (setup-steps로 환경 구성) | 이슈 기반 수정, 코드 리뷰, 단일 기능 구현 |
+
+### 충돌 방지 프로토콜
+
+1. **공유 규칙 파일:** CLAUDE.md가 단일 소스 오브 트루스(SSOT).
+2. **Copilot 전용 설정:** `.github/copilot-instructions.md`가 CLAUDE.md를 미러링.
+3. **분기 전략:** Copilot은 항상 PR 경유 → Claude Code 복귀 시 충돌 없음.
+4. **Autopus 비활성 시:** `.codex/` 설정은 참조용으로만 유지, 실행 의존성 없음.
 
 ---
 
