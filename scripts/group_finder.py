@@ -18,7 +18,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, quote_plus, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -46,21 +46,21 @@ MIN_MEMBER_COUNT        = int(os.getenv("MIN_MEMBER_COUNT",        "1000"))
 
 # 환경변수 SEARCH_KEYWORDS 가 있으면 덮어쓴다 (쉼표 구분)
 _DEFAULT_KEYWORDS = [
-    "cassino online telegram grupo link",
-    "casino telegram grupo brasil",
-    "apostas online telegram grupo",
-    "fortune tiger telegram grupo",
-    "aviator telegram brasil grupo",
-    "tigrinho telegram comunidade",
-    "mines telegram grupo apostas",
-    "blaze telegram grupo",
-    "crash telegram apostas brasil",
-    "slots telegram grupo brasil",
-    "roleta telegram casino grupo",
-    "poker online telegram grupo",
-    "cassino ao vivo telegram",
-    "bet telegram grupo brasil link",
-    "jogo online telegram comunidade",
+    "cassino brasil grupo",
+    "fortune tiger grupo telegram",
+    "tigrinho chat brasil",
+    "apostas grupo telegram brasil",
+    "aviator grupo brasil",
+    "1win grupo telegram brasil",
+    "betano grupo telegram",
+    "slots grupo brasil telegram",
+    "crash game grupo brasil",
+    "cassino online grupo telegram",
+    "bitcoin cassino grupo brasil",
+    "stake grupo brasil telegram",
+    "bonus cassino grupo telegram",
+    "deposito bonus grupo brasil",
+    "cassino vip grupo telegram",
 ]
 _kw_env = os.getenv("SEARCH_KEYWORDS", "").strip()
 SEARCH_KEYWORDS: list[str] = (
@@ -95,19 +95,30 @@ def _get_session() -> tuple[str, str] | None:
     return None
 
 
+_TME_RE = re.compile(r"(?:https?://)?t\.me/[A-Za-z0-9_@+/]+")
+
+
 def _extract_tme_from_html(html: str) -> list[str]:
-    """HTML에서 t.me URL 추출."""
+    """
+    HTML에서 t.me URL 추출.
+    1단계: BeautifulSoup으로 <a href> 파싱 (https://, http://, t.me/ 모두 커버)
+    2단계: 정규식으로 텍스트 전체 스캔 (fallback)
+    """
     found: list[str] = []
+
+    # 1단계: BeautifulSoup href 파싱
     try:
         soup = BeautifulSoup(html, "lxml")
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if "t.me/" in href:
-                found.append(href)
+        links = soup.find_all("a", href=True)
+        t_me_urls = [a["href"] for a in links if "t.me/" in a["href"]]
+        found.extend(t_me_urls)
     except Exception:
         pass
-    for match in re.findall(r"https?://t\.me/[A-Za-z0-9_@+/]+", html):
+
+    # 2단계: 정규식 스캔 (https?:// 없는 순수 t.me/ 형태도 포함)
+    for match in _TME_RE.findall(html):
         found.append(match)
+
     return found
 
 
@@ -119,9 +130,10 @@ def _search_brightdata(query: str) -> list[str]:
     if not BRIGHTDATA_API_TOKEN:
         return []
 
+    # site:t.me 는 URL에 하드코딩 (quote()로 인코딩하면 %3A로 변환돼 연산자 인식 안 됨)
     google_url = (
         f"https://www.google.com/search"
-        f"?q={quote(query)}&num=20&gl=br&hl=pt-BR"
+        f"?q=site:t.me+{quote_plus(query)}&num=20&gl=br&hl=pt-BR"
     )
 
     try:
@@ -132,7 +144,8 @@ def _search_brightdata(query: str) -> list[str]:
                     "Authorization": f"Bearer {BRIGHTDATA_API_TOKEN}",
                     "Content-Type": "application/json",
                 },
-                json={"zone": "serp", "url": google_url, "format": "raw"},
+                json={"zone": "serp", "url": google_url, "format": "raw",
+                      "country": "BR"},
             )
     except Exception as e:
         print(f"    ⚠️ Bright Data 요청 실패: {type(e).__name__} — {e}")
@@ -142,8 +155,10 @@ def _search_brightdata(query: str) -> list[str]:
         print(f"    ⚠️ Bright Data HTTP {resp.status_code}: {resp.text[:300]}")
         return []
 
-    urls: list[str] = []
     content_type = resp.headers.get("content-type", "")
+    print(f"    📡 응답 status={resp.status_code} content-type={content_type} len={len(resp.text)}")
+
+    urls: list[str] = []
 
     if "json" in content_type:
         try:
@@ -154,19 +169,29 @@ def _search_brightdata(query: str) -> list[str]:
                     urls.append(link)
                 for field in ("snippet", "description", "title"):
                     text = item.get(field) or ""
-                    urls.extend(re.findall(r"https?://t\.me/[A-Za-z0-9_@+/]+", text))
+                    urls.extend(_TME_RE.findall(text))
         except Exception:
             pass
 
     if not urls:
         urls = _extract_tme_from_html(resp.text)
 
+    # ── 디버그: 추출된 URL 전체 출력 ─────────────────────────────
+    if urls:
+        print(f"    🔗 추출된 t.me URL {len(urls)}개:")
+        for u in urls:
+            print(f"      {u}")
+    else:
+        print(f"    🔗 추출된 t.me URL 없음 (응답 앞부분): {resp.text[:400]}")
+
     return urls
 
 
 def _tme_url_to_username(url: str) -> str | None:
-    """t.me URL → @username. 초대링크(+, joinchat) 는 None."""
+    """t.me URL → username. 초대링크(+, joinchat) 는 None. 프로토콜 없는 형태도 처리."""
     try:
+        if not url.startswith("http"):
+            url = "https://" + url.lstrip("/")
         path = urlparse(url).path.lstrip("/")
     except Exception:
         return None
@@ -188,12 +213,15 @@ async def _verify_groups(
 ) -> list[dict]:
     """
     Pyrogram get_chat()으로 각 username을 검증.
+    SUPERGROUP / GROUP / CHANNEL 모두 저장 (채널은 member_scraper에서 댓글 작성자 수집).
     반환: [{"id", "username", "title", "member_count"}, ...]
     """
+    from pyrogram.enums import ChatType
     from pyrogram.errors import FloodWait
 
+    valid_types = {ChatType.SUPERGROUP, ChatType.GROUP, ChatType.CHANNEL}
     results: list[dict] = []
-    no_username = low_members = fail_count = 0
+    no_username = low_members = fail_count = wrong_type = 0
 
     for uname in usernames:
         try:
@@ -217,6 +245,13 @@ async def _verify_groups(
         if not chat_id or chat_id in seen_ids:
             continue
 
+        # 그룹/슈퍼그룹/채널만 저장 (BOT, PRIVATE 제외)
+        chat_type = getattr(full, "type", None)
+        if chat_type not in valid_types:
+            wrong_type += 1
+            print(f"    ⏭️  @{uname} 제외 (type={chat_type})")
+            continue
+
         actual_username = getattr(full, "username", None) or ""
         if not actual_username:
             no_username += 1
@@ -233,14 +268,95 @@ async def _verify_groups(
             "username":     actual_username,
             "title":        getattr(full, "title", "") or uname,
             "member_count": member_count,
+            "chat_type":    chat_type,
         })
         await asyncio.sleep(0.4)
 
     print(
-        f"    ✅ get_chat_fail={fail_count} / no_username={no_username} "
-        f"/ low_members={low_members} / 최종={len(results)}"
+        f"    ✅ get_chat_fail={fail_count} / wrong_type={wrong_type} "
+        f"/ no_username={no_username} / low_members={low_members} / 최종={len(results)}"
     )
     return results
+
+
+async def _run_phase3_telethon(
+    channels: list[dict],
+    seen_ids: set[int],
+    save_fn,
+    max_new: int,
+) -> tuple[int, int, int]:
+    """
+    Telethon으로 채널의 연결된 토론 그룹(linked_chat_id)을 조회해서 저장.
+    반환: (new, dup, none)
+    """
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+    from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
+
+    session_str = (os.getenv("SESSION_STRING_TELETHON") or "").strip()
+    if not session_str:
+        print("    ⚠️ SESSION_STRING_TELETHON 없음 — Phase 3 건너뜀")
+        return 0, 0, len(channels)
+
+    new = dup = none = 0
+
+    async with TelegramClient(StringSession(session_str), API_ID, API_HASH) as tg:
+        me = await tg.get_me()
+        print(f"✅ Telethon 연결: @{me.username or me.id}\n")
+
+        for g in channels:
+            if new >= max_new:
+                print(f"⚠️  최대 발굴 수 도달 — Phase 3 중단")
+                break
+
+            uname = g["username"]
+            try:
+                # 채널 join (권한 확보)
+                try:
+                    await tg(JoinChannelRequest(f"@{uname}"))
+                    await asyncio.sleep(1.0)
+                except Exception:
+                    pass
+
+                full = await tg(GetFullChannelRequest(f"@{uname}"))
+                linked_id = getattr(full.full_chat, "linked_chat_id", None)
+
+                if not linked_id:
+                    none += 1
+                    print(f"    ℹ️  @{uname} — 연결된 토론 그룹 없음")
+                    continue
+
+                if linked_id in seen_ids:
+                    dup += 1
+                    continue
+
+                entity = await tg.get_entity(linked_id)
+                linked_username = (getattr(entity, "username", None) or "").strip()
+                if not linked_username:
+                    none += 1
+                    print(f"    ℹ️  @{uname} 토론 그룹 (id={linked_id}) — username 없음")
+                    continue
+
+                linked_title   = getattr(entity, "title", "") or ""
+                linked_members = getattr(entity, "participants_count", 0) or 0
+
+                seen_ids.add(linked_id)
+                is_new = save_fn(linked_id, linked_username, linked_title, linked_members)
+                if is_new:
+                    new += 1
+                    print(
+                        f"  ✅ [Phase 3] @{linked_username} "
+                        f"(채널 @{uname}의 토론 그룹, 멤버 {linked_members:,}명) 저장"
+                    )
+                else:
+                    dup += 1
+
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                print(f"    ⚠️ @{uname} Phase 3 실패: {type(e).__name__} — {e}")
+
+    return new, dup, none
 
 
 async def main() -> None:
@@ -339,6 +455,7 @@ async def main() -> None:
             MIN_MEMBER_COUNT,
         )
 
+        # Phase 2 저장
         for g in groups:
             if total_new >= MAX_GROUPS_PER_RUN:
                 break
@@ -347,9 +464,29 @@ async def main() -> None:
             )
             if is_new:
                 total_new += 1
-                print(f"  ✅ @{g['username']} (멤버 {g['member_count']:,}명) 저장")
+                print(f"  ✅ @{g['username']} (멤버 {g['member_count']:,}명, type={g['chat_type']}) 저장")
             else:
                 total_dup += 1
+
+    # Phase 3: Telethon으로 채널의 연결된 토론 그룹 추가 발굴 (Pyrogram 블록 밖)
+    from pyrogram.enums import ChatType
+    channels = [g for g in groups if g.get("chat_type") == ChatType.CHANNEL]
+    print(f"\n[Phase 3] Telethon — 채널 {len(channels)}개에서 연결된 토론 그룹 조회 중...\n")
+
+    phase3_new = phase3_dup = phase3_none = 0
+    if channels:
+        phase3_new, phase3_dup, phase3_none = await _run_phase3_telethon(
+            channels,
+            seen_ids,
+            save_discovered_group,
+            MAX_GROUPS_PER_RUN - total_new,
+        )
+        total_new += phase3_new
+        total_dup += phase3_dup
+
+    print(
+        f"\n  📊 Phase 3: 신규 {phase3_new}개 / 중복 {phase3_dup}개 / 토론 그룹 없음 {phase3_none}개"
+    )
 
     stats = count_discovered_groups()
     summary = (

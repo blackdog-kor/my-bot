@@ -9,8 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -136,10 +136,100 @@ app = FastAPI(lifespan=lifespan)
 from app.affiliate_tracker import router as affiliate_router  # noqa: E402
 app.include_router(affiliate_router)
 
+# ── Railway MCP 프록시 ──────────────────────────────────────────
+_RAILWAY_PROXY_SECRET = os.getenv("RAILWAY_PROXY_SECRET", "").strip()
+
+
+def _check_mcp_secret(path_secret: str) -> bool:
+    if not _RAILWAY_PROXY_SECRET:
+        return True
+    return path_secret == _RAILWAY_PROXY_SECRET
+
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+async def _handle_mcp_request(body: dict) -> dict:
+    method = body.get("method", "")
+    req_id = body.get("id")
+
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "Railway Manager", "version": "1.0.0"},
+            },
+            "id": req_id,
+        }
+
+    if method == "notifications/initialized":
+        return {"jsonrpc": "2.0", "result": {}, "id": req_id}
+
+    if method == "tools/list":
+        from app.railway_mcp_server import TOOLS
+        return {"jsonrpc": "2.0", "result": {"tools": TOOLS}, "id": req_id}
+
+    if method == "tools/call":
+        from app.railway_mcp_server import call_tool
+        params = body.get("params", {})
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+        result_text = await call_tool(tool_name, arguments)
+        return {
+            "jsonrpc": "2.0",
+            "result": {"content": [{"type": "text", "text": result_text}]},
+            "id": req_id,
+        }
+
+    return {
+        "jsonrpc": "2.0",
+        "error": {"code": -32601, "message": f"Method not found: {method}"},
+        "id": req_id,
+    }
+
+
+@app.post("/railway-mcp/{secret}/mcp")
+async def railway_mcp_post(secret: str, request: Request):
+    """MCP Streamable HTTP POST 엔드포인트. URL 경로에 비밀값 포함."""
+    if not _check_mcp_secret(secret):
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32001, "message": "Unauthorized"}, "id": None}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None})
+    return JSONResponse(await _handle_mcp_request(body))
+
+
+@app.get("/railway-mcp/{secret}/mcp")
+async def railway_mcp_get(secret: str):
+    """MCP Streamable HTTP GET 엔드포인트. 일부 클라이언트 호환용."""
+    if not _check_mcp_secret(secret):
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32001, "message": "Unauthorized"}, "id": None}, status_code=401)
+    return JSONResponse({"status": "ok", "transport": "streamable-http"})
+
+
+@app.get("/railway-mcp-info")
+def railway_mcp_info(request: Request):
+    """Claude.ai Connector에서 Railway MCP 서버 등록 방법을 안내합니다."""
+    base = str(request.base_url).rstrip("/")
+    secret_in_url = _RAILWAY_PROXY_SECRET or "NO_SECRET_SET"
+    mcp_url = f"{base}/railway-mcp/{secret_in_url}/mcp"
+    return {
+        "mcp_server_url": mcp_url,
+        "note": "claude.ai 웹은 Bearer 헤더를 지원하지 않아 URL 경로에 비밀값을 포함합니다.",
+        "setup": [
+            "1) Railway Account Settings > Tokens 에서 API 토큰 발급",
+            "2) Railway 환경변수에 RAILWAY_API_TOKEN 추가",
+            f"3) Railway 환경변수에 RAILWAY_PROXY_SECRET 추가 (현재: {'설정됨' if _RAILWAY_PROXY_SECRET else '미설정'})",
+            "4) claude.ai > Settings > Connectors > Add custom connector",
+            f"5) Remote MCP server URL 칸에만 입력: {mcp_url}",
+            "6) Advanced settings는 비워두기 (OAuth 안 씀)",
+        ],
+    }
 
 
 @app.get("/debug/routes")
@@ -169,6 +259,29 @@ async def debug_run_group_finder():
         capture_output=True,
         text=True,
         timeout=300,
+    )
+    return {
+        "returncode": result.returncode,
+        "stdout": result.stdout[-3000:],
+        "stderr": result.stderr[-1000:],
+    }
+
+
+@app.get("/debug/run-member-scraper")
+async def debug_run_member_scraper():
+    """member_scraper.py 수동 실행 트리거 (테스트용)"""
+    import subprocess, sys
+    from pathlib import Path
+    ROOT = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "member_scraper.py")],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
     return {
         "returncode": result.returncode,
