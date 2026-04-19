@@ -220,3 +220,4 @@ GEMINI.md
 # Local databases
 data/*.db
 data/*.db-journal
+.playwright-mcp/

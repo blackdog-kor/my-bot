@@ -174,20 +174,83 @@ def _truncate(obj, max_len: int = 300) -> str:
 
 async def extract_1win_tokens() -> dict:
     """
-    Browser-based extraction for 1win-partners.com.
-    Navigates to dashboard pages to trigger auth API calls.
+    1win-partners.com uses GeeTest CAPTCHA + Cloudflare — automated login is not feasible.
+    This function attempts to read tokens from an already-authenticated browser session
+    (persistent profile), then falls back to env var refresh token.
+    If neither is available, raises with instructions for manual injection.
     """
+    import os
+
+    # Try reading from persistent browser profile first (if bootstrap_profile was run)
     result = await discover(
         "https://1win-partners.com",
         wait_seconds=6,
         navigate_paths=["dashboard", "stats", "finance"],
     )
-    if not result.tokens.get("accessToken"):
-        raise RuntimeError(
-            "No accessToken captured. User must be logged in to 1win-partners.com "
-            "in a Chrome profile, or provide credentials."
+    if result.tokens.get("accessToken"):
+        return result.tokens
+
+    # Fall back to env-var refresh token
+    refresh_token = os.getenv("1WIN_REFRESH_TOKEN", "")
+    if refresh_token:
+        logger.info("[1win] attempting token refresh from 1WIN_REFRESH_TOKEN env var")
+        from app.web_agent import fetch_api
+        try:
+            data = await fetch_api(
+                "https://1win-partners.com/api/v2/auth/refresh",
+                method="POST",
+                json_body={"refreshToken": refresh_token},
+            )
+            access_token = data.get("accessToken") or data.get("data", {}).get("accessToken")
+            new_refresh = data.get("refreshToken") or data.get("data", {}).get("refreshToken", refresh_token)
+            if access_token:
+                return {"accessToken": access_token, "refreshToken": new_refresh}
+        except Exception as e:
+            logger.warning("[1win] env refresh token failed: %s", e)
+
+    _notify_admin_token_required()
+    raise RuntimeError(
+        "1win-partners token unavailable. "
+        "Login is protected by GeeTest CAPTCHA — automated extraction is blocked. "
+        "Options:\n"
+        "  1. Set 1WIN_REFRESH_TOKEN env var in Railway with your refresh token\n"
+        "  2. Use /settoken 1win-partners <accessToken> from the admin bot\n"
+        "  3. Run scripts/bootstrap_profile.py locally to create a persistent session"
+    )
+
+
+def _notify_admin_token_required() -> None:
+    """Send a Telegram DM to ADMIN_ID if the bot token is configured."""
+    import os, threading
+
+    bot_token = os.getenv("SUBSCRIBE_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+    admin_id = os.getenv("ADMIN_ID", "")
+    if not bot_token or not admin_id:
+        return
+
+    def _send():
+        import urllib.request, urllib.parse, json as _json
+        msg = (
+            "⚠️ *1win-partners token expired*\n\n"
+            "Automated login is blocked by GeeTest CAPTCHA.\n\n"
+            "Please provide a fresh token:\n"
+            "`/settoken 1win-partners <accessToken>`\n\n"
+            "Or set `1WIN_REFRESH_TOKEN` in Railway env vars."
         )
-    return result.tokens
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = _json.dumps({
+            "chat_id": admin_id,
+            "text": msg,
+            "parse_mode": "Markdown",
+        }).encode()
+        try:
+            req = urllib.request.Request(url, data=payload,
+                                         headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as exc:
+            logger.warning("[1win] admin notify failed: %s", exc)
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 async def refresh_1win_tokens(cached: dict) -> dict:
