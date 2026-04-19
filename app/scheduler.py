@@ -137,6 +137,13 @@ def _job_1win_collector() -> None:
         _notify("📊 1win 통계 수집 Job 완료" if ok else "📊 1win 통계 수집 Job 실패")
 
 
+def _job_content_pipeline() -> None:
+    with _job_lock:
+        _notify("📺 콘텐츠 자동화 Job 시작 (스크래핑→리라이팅→게시)")
+        ok = _run_script("content_pipeline.py", "콘텐츠자동화(content_pipeline)")
+        _notify("📺 콘텐츠 자동화 Job 완료" if ok else "📺 콘텐츠 자동화 Job 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -181,6 +188,18 @@ def run_scheduler_forever() -> None:
         trigger=CronTrigger(hour=1, minute=0),
         id="1win_collector",
     )
+    # 05:00 UTC (14:00 KST) — 콘텐츠 자동화 (스크래핑→리라이팅→채널 게시)
+    scheduler.add_job(
+        _job_content_pipeline,
+        trigger=CronTrigger(hour=5, minute=0),
+        id="content_pipeline",
+    )
+    # 11:00 UTC (20:00 KST) — 콘텐츠 자동화 2차 (저녁 피크타임)
+    scheduler.add_job(
+        _job_content_pipeline,
+        trigger=CronTrigger(hour=11, minute=0),
+        id="content_pipeline_evening",
+    )
     scheduler.start()
 
     # 다음 예약 Job 목록 로그
@@ -188,7 +207,7 @@ def run_scheduler_forever() -> None:
     for j in jobs:
         logger.info("다음 예약: %s — %s", j.id, j.next_run_time)
     print(
-        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / [발송 비활성화] / 재발송 12:00 / 구독봇 푸시 00:00(UTC=09KST) / 워밍업 23:00(UTC=08KST) ---",
+        "--- 스케줄러 기동: 발굴 03:00 / 수집 00:00 / [발송 비활성화] / 재발송 12:00 / 구독봇 푸시 00:00(UTC=09KST) / 워밍업 23:00(UTC=08KST) / 콘텐츠 05:00+11:00 ---",
         flush=True,
     )
 

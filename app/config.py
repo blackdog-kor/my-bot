@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     affiliate_webhook_secret: str = ""
     railway_proxy_secret: str = ""
 
+    # ── Content Automation ────────────────────────────────────────
+    content_scrape_sources: str = ""  # comma-separated Telegram channel usernames
+    content_post_interval_hours: int = 4  # hours between auto-posts
+    content_max_daily_posts: int = 6  # max posts per day
+    content_rewrite_enabled: bool = True  # AI rewrite before posting
+    openai_api_key: str = ""  # for content rewriting
+
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""
 

@@ -28,6 +28,9 @@
 - [ ] `app/claude_advisor.py` 기본 구현 (Sonnet + Opus Advisor 패턴)
 - [ ] Gemini 캡션 → Claude Sonnet 교체 (`app/userbot_sender.py`)
 - [ ] `.playwright-mcp/` 정리 (gitignore 또는 커밋 결정)
+- [ ] 콘텐츠 소스 채널 목록 확정 (`CONTENT_SCRAPE_SOURCES` 환경변수)
+- [ ] 콘텐츠 자동화 파이프라인 테스트 (`/debug/content-test` 추가)
+- [ ] `CHANNEL_ID` 환경변수 설정 (게시 대상 채널)
 
 ---
 
@@ -38,6 +41,9 @@
 - [ ] 타겟 그룹에 UserBot 계정 가입 (PeerIdInvalid 예방)
 - [ ] DM 발송 스케줄 활성화 (`scheduler.py` 주석 해제)
 - [ ] GitHub Projects Kanban 보드 설정
+- [ ] 콘텐츠 자동화 A/B 테스트 (리라이팅 변형별 조회수 비교)
+- [ ] VIP 세분화 — `broadcast_targets`에 tier 컬럼 추가
+- [ ] 리텐션 자동 푸시 시퀀스 (가입 후 3일/7일/14일)
 
 ---
 
@@ -51,6 +57,10 @@
 - [ ] Sentry/Logfire 도입 (에러 추적 + 성능 모니터링)
 - [ ] LangGraph 에이전트 오케스트레이션 (agent_runner.py 연계)
 - [ ] Temporal.io/Prefect 분산 워크플로우 검토 (APScheduler 대체)
+- [ ] 링크 클로킹 서버 구축 (어필리에이트 링크 보호)
+- [ ] WhatsApp Business API 채널 추가 (다채널 확장)
+- [ ] 프록시 로테이션 통합 (계정 안전성 강화)
+- [ ] Gemini AI 메시지 스피닝 고도화 (DM 전환율 극대화)
 
 ---
 
