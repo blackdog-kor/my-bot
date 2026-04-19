@@ -298,8 +298,10 @@ async def scrape_web_sources() -> list[dict[str, Any]]:
         if not article.text.strip():
             continue
 
-        # URL 기반 고유 ID 생성
-        msg_id = abs(hash(article.url)) % (10**9)
+        # URL 기반 고유 ID 생성 (deterministic — hashlib 사용)
+        import hashlib
+        url_hash = hashlib.sha256(article.url.encode()).hexdigest()
+        msg_id = int(url_hash[:8], 16) % (10**9)
 
         results.append({
             "text": article.text,
