@@ -30,8 +30,21 @@ WEBHOOK_SECRET = os.getenv("AFFILIATE_WEBHOOK_SECRET", "")
 
 
 async def get_access_token() -> str:
+    # Priority 1: token_vault (auto-refresh, browser fallback)
+    try:
+        from app.api_discovery import register_1win
+        from app.token_vault import get_tokens
+        register_1win()
+        tokens = await get_tokens("1win-partners")
+        if tokens.get("accessToken"):
+            logger.info("[1win] token from vault")
+            return tokens["accessToken"]
+    except Exception as e:
+        logger.warning("[1win] vault failed (%s) — falling back to env token", e)
+
+    # Priority 2: env refreshToken
     if not REFRESH_TOKEN:
-        raise RuntimeError("1WIN_REFRESH_TOKEN env var not set")
+        raise RuntimeError("No token available: vault failed and 1WIN_REFRESH_TOKEN not set")
 
     data = await fetch_api(
         f"{API_BASE}/api/v2/auth/refresh",
@@ -40,9 +53,8 @@ async def get_access_token() -> str:
     )
     token = data.get("accessToken") or data.get("data", {}).get("accessToken")
     if not token:
-        # avoid logging raw response — may contain token fragments
         raise RuntimeError("Token refresh failed: empty accessToken in response")
-    logger.info("[1win] access token refreshed OK")
+    logger.info("[1win] access token refreshed from env")
     return token
 
 

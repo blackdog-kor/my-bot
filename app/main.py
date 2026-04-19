@@ -81,6 +81,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("ensure_affiliate_stats_table: %s", e)
 
+    try:
+        from app.token_vault import ensure_vault_table
+        from app.api_discovery import register_1win
+        ensure_vault_table()
+        register_1win()
+    except Exception as e:
+        logger.warning("token_vault init: %s", e)
+
     # Admin Bot 스레드 시작
     try:
         bot_thread = threading.Thread(target=_run_bot, daemon=True)
