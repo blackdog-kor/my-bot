@@ -1,0 +1,18 @@
+# Copilot Agent Environment Setup
+# This configures the Copilot coding agent to have equivalent capabilities
+# to Claude Code when working on this project.
+
+steps:
+  - name: Install Python dependencies
+    run: pip install -r requirements.txt
+
+  - name: Install development tools
+    run: pip install ruff
+
+  - name: Verify syntax
+    run: |
+      python -m py_compile app/main.py
+      python -m py_compile app/userbot_sender.py
+      python -m py_compile app/pg_broadcast.py
+      python -m py_compile app/scheduler.py
+      python -m py_compile bot/subscribe_bot.py
