@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import sys
@@ -20,14 +19,16 @@ sys.path.insert(0, "/app")
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-logger = logging.getLogger("scheduler")
+from app.logging_config import get_logger
+from app.config import settings
+
+logger = get_logger("scheduler")
 
 ROOT = Path(__file__).resolve().parents[1]  # repo root (app/scheduler.py)
 _job_lock = threading.Lock()
 
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
-ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "").strip()
-ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+BOT_TOKEN = settings.bot_token
+ADMIN_ID: int | None = settings.admin_id if settings.admin_id else None
 
 
 def _notify(text: str) -> None:

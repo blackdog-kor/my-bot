@@ -14,6 +14,10 @@
 - [x] ROADMAP.md 작성
 - [x] AI_STACK.md 작성
 - [x] DEVLOG.md + TODO.md 자동 기록 시스템 도입
+- [x] `structlog` 실적용 — main, userbot_sender, scheduler, pg_broadcast, retry_utils 전환
+- [x] `pydantic-settings` 실적용 — userbot_sender, main에서 os.getenv → settings 교체
+- [x] `tenacity` 실적용 — `_download_via_bot_api`에 재시도 데코레이터 적용
+- [x] PostgreSQL MCP 추가 (`.mcp.json`에 `@anthropic/mcp-server-postgres`)
 
 ---
 
@@ -44,6 +48,9 @@
 - [ ] 관리자 일일 리포트 자동 DM 발송
 - [ ] 다중 세션 (SESSION_STRING_4~10) 확보
 - [ ] 완전 무인 운영 모드 구축
+- [ ] Sentry/Logfire 도입 (에러 추적 + 성능 모니터링)
+- [ ] LangGraph 에이전트 오케스트레이션 (agent_runner.py 연계)
+- [ ] Temporal.io/Prefect 분산 워크플로우 검토 (APScheduler 대체)
 
 ---
 

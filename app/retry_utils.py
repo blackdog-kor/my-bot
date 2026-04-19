@@ -9,8 +9,6 @@ Usage:
 """
 from __future__ import annotations
 
-import asyncio
-import logging
 from typing import Any, Callable
 
 from tenacity import (
@@ -21,7 +19,9 @@ from tenacity import (
     wait_exponential,
 )
 
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Jitter range for FloodWait backoff (percentage of base wait)
 _JITTER_MIN_PERCENT = 0.1

@@ -1,4 +1,3 @@
-import logging
 import os
 import secrets
 import sys
@@ -13,16 +12,16 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
 
-AFFILIATE_URL = os.getenv("AFFILIATE_URL", "https://t.me")
+logger = get_logger(__name__)
+
+from app.config import settings
+
+AFFILIATE_URL = settings.affiliate_url or "https://t.me"
 
 # ── Debug endpoint authentication ────────────────────────────────────────────
-_DEBUG_SECRET = os.getenv("DEBUG_SECRET", "").strip()
+_DEBUG_SECRET = settings.debug_secret
 
 
 def _check_debug_auth(request: Request) -> bool:
@@ -115,7 +114,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Bot thread start failed: %s", e)
 
     # Subscribe Bot 스레드 시작 (SUBSCRIBE_BOT_TOKEN이 설정된 경우에만)
-    if (os.getenv("SUBSCRIBE_BOT_TOKEN") or "").strip():
+    if settings.subscribe_bot_token:
         try:
             sub_thread = threading.Thread(target=_run_subscribe_bot, daemon=True)
             sub_thread.start()
@@ -157,7 +156,7 @@ app.include_router(affiliate_router)
 app.include_router(win1_router)
 
 # ── Railway MCP 프록시 ──────────────────────────────────────────
-_RAILWAY_PROXY_SECRET = os.getenv("RAILWAY_PROXY_SECRET", "").strip()
+_RAILWAY_PROXY_SECRET = settings.railway_proxy_secret
 
 
 def _check_mcp_secret(path_secret: str) -> bool:
@@ -345,8 +344,8 @@ async def debug_dm_test(request: Request, username: str = "", user_id: int = 0):
             ],
         }
 
-    api_id   = int(os.getenv("API_ID",   "0") or "0")
-    api_hash = (os.getenv("API_HASH") or "").strip()
+    api_id   = settings.api_id
+    api_hash = settings.api_hash
     if not api_id or not api_hash:
         return {"error": "API_ID 또는 API_HASH가 설정되지 않았습니다."}
 
@@ -429,8 +428,8 @@ async def debug_session_test(request: Request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     import asyncio
 
-    api_id   = int(os.getenv("API_ID",   "0") or "0")
-    api_hash = (os.getenv("API_HASH") or "").strip()
+    api_id   = settings.api_id
+    api_hash = settings.api_hash
 
     if not api_id or not api_hash:
         return {"error": "API_ID 또는 API_HASH 환경변수가 설정되지 않았습니다."}
