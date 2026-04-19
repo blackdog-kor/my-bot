@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import secrets
 
 import httpx
 import psycopg2
@@ -150,7 +151,7 @@ async def receive_stats(payload: AffiliateStatsPayload):
     """Chrome용 Claude or any client POSTs daily stats here."""
     if not AFFILIATE_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="Webhook not configured")
-    if payload.secret != AFFILIATE_WEBHOOK_SECRET:
+    if not secrets.compare_digest(payload.secret, AFFILIATE_WEBHOOK_SECRET):
         raise HTTPException(status_code=403, detail="Invalid secret")
 
     data = payload.model_dump()

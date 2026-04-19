@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import sys
 import threading
 
@@ -28,7 +29,8 @@ def _check_debug_auth(request: Request) -> bool:
     """DEBUG_SECRET 미설정 시 전체 차단, 설정 시 헤더 매칭 확인."""
     if not _DEBUG_SECRET:
         return False
-    return request.headers.get("X-Debug-Secret") == _DEBUG_SECRET
+    provided = request.headers.get("X-Debug-Secret", "")
+    return secrets.compare_digest(provided, _DEBUG_SECRET)
 
 
 def _run_bot():

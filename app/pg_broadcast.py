@@ -25,8 +25,17 @@ def _init_pool() -> None:
         logger.warning("DATABASE_URL not set — DB pool not initialized")
         return
     try:
-        _pool = pg_pool.ThreadedConnectionPool(minconn=2, maxconn=10, dsn=DATABASE_URL)
-        logger.info("DB connection pool initialized (min=2, max=10)")
+        from app.config import settings
+        _pool = pg_pool.ThreadedConnectionPool(
+            minconn=settings.db_pool_min_conn,
+            maxconn=settings.db_pool_max_conn,
+            dsn=DATABASE_URL,
+        )
+        logger.info(
+            "DB connection pool initialized (min=%d, max=%d)",
+            settings.db_pool_min_conn,
+            settings.db_pool_max_conn,
+        )
     except Exception as e:
         logger.exception("Failed to initialize DB pool: %s", e)
         _pool = None

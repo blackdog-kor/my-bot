@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     batch_size: int = 50
     daily_limit_per_account: int = 100
 
+    # ── DB Pool ──────────────────────────────────────────────────
+    db_pool_min_conn: int = 2
+    db_pool_max_conn: int = 10
+
     # ── Security ─────────────────────────────────────────────────
     debug_secret: str = ""
     affiliate_webhook_secret: str = ""

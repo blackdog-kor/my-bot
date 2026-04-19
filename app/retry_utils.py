@@ -23,6 +23,10 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
+# Jitter range for FloodWait backoff (percentage of base wait)
+_JITTER_MIN_PERCENT = 0.1
+_JITTER_MAX_PERCENT = 0.3
+
 
 def _is_floodwait(exc: BaseException) -> bool:
     """Check if exception is a Pyrogram FloodWait error."""
@@ -38,8 +42,8 @@ def _wait_floodwait(retry_state: RetryCallState) -> float:
         base_wait = float(exc.value)  # type: ignore[union-attr]
     else:
         base_wait = 60.0
-    # Add 10-30% jitter to avoid thundering herd
-    jitter = base_wait * random.uniform(0.1, 0.3)
+    # Add jitter to avoid thundering herd
+    jitter = base_wait * random.uniform(_JITTER_MIN_PERCENT, _JITTER_MAX_PERCENT)
     total_wait = base_wait + jitter
     logger.warning(
         "FloodWait: waiting %.1f seconds (base=%d, jitter=%.1f)",
