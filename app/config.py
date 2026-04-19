@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     content_rewrite_enabled: bool = True  # AI rewrite before posting
     openai_api_key: str = ""  # for content rewriting
 
+    # ── Web Scraping (Layer 1 — zero ban risk) ────────────────────
+    web_scrape_sources: str = ""  # comma-separated extra URLs to scrape
+    web_scrape_enabled: bool = True  # enable external web scraping
+    telegram_scrape_enabled: bool = False  # disable risky Telethon scraping by default
+
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""
 

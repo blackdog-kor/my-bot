@@ -2,12 +2,13 @@
 """
 콘텐츠 자동화 파이프라인: 스크래핑 → AI 리라이팅 → DB 저장 → 채널 게시.
 
-실행 흐름:
-1. 소스 채널에서 인기 콘텐츠 스크래핑 (Telethon)
-2. 중복 필터링 (이미 수집된 콘텐츠 제외)
-3. AI 리라이팅 (OpenAI/Gemini)
-4. channel_content 테이블에 저장
-5. 대기 콘텐츠 채널 게시
+실행 흐름 (3-Layer 안전 수집):
+1. Layer 1: 외부 웹사이트 스크래핑 (차단 위험 0%) — 기본 소스
+2. Layer 2: Telethon 채널 스크래핑 (차단 위험 높음) — 폴백, 비활성화 가능
+3. 중복 필터링 (이미 수집된 콘텐츠 제외)
+4. AI 리라이팅 (OpenAI/Gemini)
+5. channel_content 테이블에 저장
+6. 대기 콘텐츠 채널 게시
 
 scheduler.py에서 subprocess로 실행됨.
 """
@@ -34,7 +35,6 @@ logger = logging.getLogger("content_pipeline")
 
 async def run_scrape_and_rewrite() -> int:
     """스크래핑 + 리라이팅 + DB 저장. 저장된 수 반환."""
-    from app.content_scraper import scrape_all_sources
     from app.content_rewriter import rewrite_content
     from app.pg_broadcast import (
         ensure_channel_content_table,
@@ -46,29 +46,55 @@ async def run_scrape_and_rewrite() -> int:
     # 테이블 보장
     ensure_channel_content_table()
 
-    # 1. 스크래핑
-    logger.info("=== 콘텐츠 스크래핑 시작 ===")
-    scraped = await scrape_all_sources()
+    scraped: list[dict] = []
+
+    # ── Layer 1: 외부 웹 스크래핑 (차단 위험 0%) ──
+    if settings.web_scrape_enabled:
+        logger.info("=== Layer 1: 외부 웹 스크래핑 시작 ===")
+        try:
+            from app.web_content_scraper import scrape_web_sources
+            web_results = await scrape_web_sources()
+            scraped.extend(web_results)
+            logger.info("웹 스크래핑 완료: %d개 수집", len(web_results))
+        except Exception as e:
+            logger.warning("웹 스크래핑 실패 (Layer 1): %s", e)
+
+    # ── Layer 2: Telethon 채널 스크래핑 (폴백, 기본 비활성화) ──
+    if settings.telegram_scrape_enabled:
+        logger.info("=== Layer 2: Telegram 채널 스크래핑 시작 (주의: 차단 위험) ===")
+        try:
+            from app.content_scraper import scrape_all_sources
+            tg_results = await scrape_all_sources()
+            scraped.extend(tg_results)
+            logger.info("Telegram 스크래핑 완료: %d개 수집", len(tg_results))
+        except Exception as e:
+            logger.warning("Telegram 스크래핑 실패 (Layer 2): %s", e)
+    else:
+        logger.info("Telegram 스크래핑 비활성화 (TELEGRAM_SCRAPE_ENABLED=false)")
+
     if not scraped:
-        logger.warning("스크래핑된 콘텐츠 없음")
+        logger.warning("스크래핑된 콘텐츠 없음 (모든 Layer)")
         return 0
 
-    logger.info("스크래핑 완료: %d개 후보", len(scraped))
+    logger.info("총 스크래핑 완료: %d개 후보", len(scraped))
 
-    # 2. 중복 필터 + 리라이팅 + 저장
+    # ── 중복 필터 + 리라이팅 + 저장 ──
     saved_count = 0
-    max_save = settings.batch_size  # 설정에서 한 번에 최대 저장 수 참조
+    max_save = settings.batch_size
 
     for item in scraped:
         if saved_count >= max_save:
             break
 
         # 중복 체크
-        if is_content_duplicate(item["source_channel"], item["message_id"]):
+        source = item.get("source_channel", "unknown")
+        msg_id = item.get("message_id", 0)
+        if is_content_duplicate(source, msg_id):
             continue
 
         # 텍스트 없으면 스킵
-        if not item["text"].strip():
+        text = item.get("text", "").strip()
+        if not text:
             continue
 
         # AI 리라이팅
@@ -76,27 +102,27 @@ async def run_scrape_and_rewrite() -> int:
         if settings.content_rewrite_enabled:
             try:
                 rewritten = await rewrite_content(
-                    original_text=item["text"],
-                    media_type=item["media_type"],
+                    original_text=text,
+                    media_type=item.get("media_type", "text"),
                 )
             except Exception as e:
                 logger.warning("리라이팅 실패: %s", e)
 
         # DB 저장
         content_id = save_channel_content(
-            original_text=item["text"],
+            original_text=text,
             rewritten_text=rewritten,
-            media_type=item["media_type"],
-            source_channel=item["source_channel"],
-            source_msg_id=item["message_id"],
-            source_views=item["views"],
+            media_type=item.get("media_type", "text"),
+            source_channel=source,
+            source_msg_id=msg_id,
+            source_views=item.get("views", 0),
         )
 
         if content_id:
             saved_count += 1
             logger.info(
                 "콘텐츠 #%d 저장 (src=%s, views=%d)",
-                content_id, item["source_channel"], item["views"],
+                content_id, source, item.get("views", 0),
             )
 
         # API rate limit 방지
@@ -159,3 +185,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+

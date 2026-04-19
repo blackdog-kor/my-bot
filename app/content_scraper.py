@@ -47,8 +47,15 @@ MIN_VIEWS_THRESHOLD: int = 500
 # 스크래핑 기간 (최근 N일)
 SCRAPE_DAYS_BACK: int = 2
 
-# 한 채널당 최대 수집 메시지 수
-MAX_MESSAGES_PER_CHANNEL: int = 30
+# 한 채널당 최대 수집 메시지 수 (안티 탐지: 50 이하 권장)
+MAX_MESSAGES_PER_CHANNEL: int = 50
+
+# 한 세션당 최대 채널 수 (안티 탐지: 10 이하 권장)
+MAX_CHANNELS_PER_SESSION: int = 10
+
+# 채널 간 딜레이 범위 (초) — 안티 탐지: 30~120초 랜덤 권장
+CHANNEL_DELAY_MIN: float = 30.0
+CHANNEL_DELAY_MAX: float = 120.0
 
 
 def _get_source_channels() -> list[str]:
@@ -137,7 +144,13 @@ async def scrape_channel_content(
 
 
 async def scrape_all_sources() -> list[dict[str, Any]]:
-    """모든 소스 채널에서 콘텐츠 수집. Telethon 세션 사용."""
+    """모든 소스 채널에서 콘텐츠 수집. Telethon 세션 사용.
+
+    ⚠️ WARNING: 이 함수는 계정 차단 위험이 있음.
+    가능하면 web_content_scraper.scrape_web_sources()를 우선 사용할 것.
+    """
+    import random
+
     session_str = os.getenv("SESSION_STRING_TELETHON", "").strip()
     if not session_str:
         logger.error("SESSION_STRING_TELETHON이 설정되지 않았습니다.")
@@ -163,14 +176,21 @@ async def scrape_all_sources() -> list[dict[str, Any]]:
         logger.info("Telethon 연결 성공: %s (id=%d)", me.username or "N/A", me.id)
 
         channels = _get_source_channels()
+        # 안티 탐지: 한 세션당 최대 채널 수 제한
+        if len(channels) > MAX_CHANNELS_PER_SESSION:
+            channels = random.sample(channels, MAX_CHANNELS_PER_SESSION)
+            logger.info("채널 수 제한 적용: %d개로 축소", MAX_CHANNELS_PER_SESSION)
+
         for ch in channels:
             try:
                 items = await scrape_channel_content(client, ch)
                 all_content.extend(items)
             except Exception as e:
                 logger.warning("채널 %s 스크래핑 실패: %s", ch, e)
-            # 채널 간 딜레이 (안티 탐지)
-            await asyncio.sleep(2.0)
+            # 안티 탐지: 채널 간 랜덤 딜레이 (30~120초)
+            delay = random.uniform(CHANNEL_DELAY_MIN, CHANNEL_DELAY_MAX)
+            logger.info("안티 탐지 딜레이: %.1f초 대기", delay)
+            await asyncio.sleep(delay)
 
     except Exception as e:
         logger.exception("콘텐츠 스크래핑 전체 실패: %s", e)
