@@ -13,10 +13,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import sys
-import time
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -29,6 +29,8 @@ load_dotenv(ROOT / ".env")
 load_dotenv(ROOT / "bot" / ".env")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+logger = logging.getLogger(__name__)
 
 API_ID   = int((os.getenv("API_ID")   or "0").strip())
 API_HASH = (os.getenv("API_HASH") or "").strip()
@@ -79,7 +81,7 @@ def _notify(text: str) -> None:
                       "disable_web_page_preview": True},
             )
     except Exception:
-        pass
+        logger.exception("_notify 전송 실패")
 
 
 def _get_session() -> tuple[str, str] | None:
@@ -304,7 +306,7 @@ async def main() -> None:
                 new_this_kw += 1
         print(f"    🔎 raw_urls={len(raw_urls)} / 신규 username={new_this_kw} / 누적={len(username_candidates)}")
         if i < len(SEARCH_KEYWORDS) - 1:
-            time.sleep(KEYWORD_DELAY_SEC)
+            await asyncio.sleep(KEYWORD_DELAY_SEC)
 
     print(f"\n  📋 Phase 1 완료: username 후보 {len(username_candidates)}개\n")
 

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/.mcp.schema.json",
+  "mcpServers": {
+    "railway": {
+      "$comment": "Railway 배포 상태 모니터링 — wrapper script으로 CLI 인증 우회",
+      "command": "/bin/bash",
+      "args": ["-l", "-c", "export PATH=/home/codespace/nvm/current/bin:$PATH && exec npx -y @railway/mcp-server"],
+      "env": {
+        "RAILWAY_TOKEN": "${RAILWAY_TOKEN}",
+        "RAILWAY_API_TOKEN": "${RAILWAY_TOKEN}"
+      }
+    },
+    "context7": {
+      "$comment": "Up-to-date documentation and code examples via Context7",
+      "args": [
+        "-l",
+        "-c",
+        "exec npx -y @upstash/context7-mcp@latest"
+      ],
+      "command": "/bin/bash"
+    },
+    "sequential-thinking": {
+      "$comment": "Step-by-step reasoning for complex problems (--think flag)",
+      "args": [
+        "-l",
+        "-c",
+        "exec npx -y @modelcontextprotocol/server-sequential-thinking"
+      ],
+      "command": "/bin/bash"
+    },
+    "playwright": {
+      "$comment": "Browser automation — 1win-partners 대시보드 탐색용",
+      "command": "/bin/bash",
+      "args": ["-l", "-c", "exec npx -y @playwright/mcp@latest"]
+    }
+  }
+}

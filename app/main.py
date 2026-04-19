@@ -75,6 +75,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("ensure_campaign_config_table: %s", e)
 
+    try:
+        from app.affiliate_tracker import ensure_affiliate_stats_table
+        ensure_affiliate_stats_table()
+    except Exception as e:
+        logger.warning("ensure_affiliate_stats_table: %s", e)
+
     # Admin Bot 스레드 시작
     try:
         bot_thread = threading.Thread(target=_run_bot, daemon=True)
@@ -103,6 +109,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+from app.affiliate_tracker import router as affiliate_router  # noqa: E402
+app.include_router(affiliate_router)
 
 
 @app.get("/health")
