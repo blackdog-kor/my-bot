@@ -722,6 +722,13 @@ def build_application() -> Application:
         app.add_handler(CommandHandler("agentstatus", cmd_agent_status))
     except Exception as _e:
         logger.warning("agent_cmd handlers not loaded: %s", _e)
+    try:
+        from bot.handlers.token_cmd import cmd_settoken, cmd_tokeninfo, cmd_refreshtoken
+        app.add_handler(CommandHandler("settoken", cmd_settoken))
+        app.add_handler(CommandHandler("tokeninfo", cmd_tokeninfo))
+        app.add_handler(CommandHandler("refreshtoken", cmd_refreshtoken))
+    except Exception as _e:
+        logger.warning("token_cmd handlers not loaded: %s", _e)
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(
         MessageHandler(
