@@ -1,4 +1,3 @@
-import logging
 import os
 import sys
 from contextlib import contextmanager
@@ -10,7 +9,9 @@ from psycopg2 import pool as pg_pool
 sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 

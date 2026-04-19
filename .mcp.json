@@ -10,6 +10,14 @@
         "RAILWAY_API_TOKEN": "${RAILWAY_TOKEN}"
       }
     },
+    "postgres": {
+      "$comment": "Railway PostgreSQL 직접 조회 — DB 디버깅 자동화",
+      "command": "/bin/bash",
+      "args": ["-l", "-c", "exec npx -y @anthropic/mcp-server-postgres ${DATABASE_URL}"],
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}"
+      }
+    },
     "context7": {
       "$comment": "Up-to-date documentation and code examples via Context7",
       "args": [

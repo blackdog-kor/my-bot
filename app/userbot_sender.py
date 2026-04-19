@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import logging
 import os
 import random
 import sys
@@ -26,24 +25,27 @@ import httpx
 sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-logger = logging.getLogger(__name__)
+from app.config import settings
+from app.logging_config import get_logger
 
-# ── 환경변수 ──────────────────────────────────────────────────────────────────
-API_ID   = int((os.getenv("API_ID")   or "0").strip())
-API_HASH = (os.getenv("API_HASH") or "").strip()
+logger = get_logger(__name__)
 
-USER_DELAY_MIN         = float(os.getenv("USER_DELAY_MIN",          "15"))
-USER_DELAY_MAX         = float(os.getenv("USER_DELAY_MAX",          "45"))
-LONG_BREAK_EVERY       = int(  os.getenv("LONG_BREAK_EVERY",        "50"))
-LONG_BREAK_MIN         = float(os.getenv("LONG_BREAK_MIN",          "300"))
-LONG_BREAK_MAX         = float(os.getenv("LONG_BREAK_MAX",          "600"))
-BATCH_SIZE             = int(  os.getenv("BATCH_SIZE",               "50"))
-DAILY_LIMIT_PER_ACCOUNT = int( os.getenv("DAILY_LIMIT_PER_ACCOUNT", "100"))
+# ── 설정값 (pydantic-settings에서 로드) ───────────────────────────────────────
+API_ID   = settings.api_id
+API_HASH = settings.api_hash
 
-VIP_URL             = (os.getenv("VIP_URL") or "https://1wwtgq.com/?p=mskf").strip()
-AFFILIATE_URL       = (os.getenv("AFFILIATE_URL") or "").strip()  # campaign_config 폴백 전용
-TRACKING_SERVER_URL = (os.getenv("TRACKING_SERVER_URL") or "").rstrip("/")
-GEMINI_API_KEY      = (os.getenv("GEMINI_API_KEY") or "").strip()
+USER_DELAY_MIN         = settings.user_delay_min
+USER_DELAY_MAX         = settings.user_delay_max
+LONG_BREAK_EVERY       = settings.long_break_every
+LONG_BREAK_MIN         = settings.long_break_min
+LONG_BREAK_MAX         = settings.long_break_max
+BATCH_SIZE             = settings.batch_size
+DAILY_LIMIT_PER_ACCOUNT = settings.daily_limit_per_account
+
+VIP_URL             = settings.vip_url
+AFFILIATE_URL       = settings.affiliate_url
+TRACKING_SERVER_URL = settings.tracking_server_url.rstrip("/") if settings.tracking_server_url else ""
+GEMINI_API_KEY      = settings.gemini_api_key
 
 
 async def personalize_caption(caption: str, username: str) -> str:
@@ -134,9 +136,21 @@ def _load_sessions() -> list[tuple[str, str]]:
     return sessions
 
 
-# ── Bot API 다운로드 ───────────────────────────────────────────────────────────
+# ── Bot API 다운로드 (tenacity 재시도 적용) ────────────────────────────────────
+from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential_jitter(initial=2, max=30, jitter=5),
+    reraise=True,
+)
 async def _download_via_bot_api(bot_token: str, file_id: str) -> tuple[bytes, str]:
-    """Bot API getFile → 파일 bytes + remote_path 반환."""
+    """Bot API getFile → 파일 bytes + remote_path 반환.
+
+    Retries up to 3 times on any exception (network timeout, HTTP 5xx, etc.)
+    with exponential backoff + jitter to handle transient Bot API failures.
+    """
     async with httpx.AsyncClient(timeout=120) as hc:
         r = await hc.get(
             f"https://api.telegram.org/bot{bot_token}/getFile",

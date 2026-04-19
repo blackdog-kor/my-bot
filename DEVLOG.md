@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-04-19 | 시니어 기술 스택 실제 적용 (structlog + pydantic-settings + tenacity + PostgreSQL MCP)
+
+### 💡 결정 사항
+- 제미나이 추천 5개 중 Context7만 유효, 나머지 4개(v0, Bolt.new, Cline, Smithery)는 프론트엔드용으로 부적합 판정
+- 이미 설치만 되어 있던 `structlog`, `pydantic-settings`, `tenacity`를 실제 코드에 적용하기로 결정
+- PostgreSQL MCP 서버 추가로 Claude Code의 DB 직접 쿼리 기능 활성화
+
+### 🔧 변경 내용
+- `.mcp.json` — `@anthropic/mcp-server-postgres` 추가 (Railway PostgreSQL 직접 조회)
+- `app/main.py` — `logging.basicConfig()` → `structlog` 전환 + `os.getenv` → `settings` 전환
+- `app/userbot_sender.py` — `os.getenv` 17개 → `settings` 전환, `logging` → `structlog`, `_download_via_bot_api`에 tenacity 재시도 적용
+- `app/scheduler.py` — `logging` → `structlog` 전환
+- `app/pg_broadcast.py` — `logging` → `structlog` 전환
+- `app/retry_utils.py` — `logging` → `structlog` 전환
+
+### 📋 다음 할 일
+- ANTHROPIC_API_KEY 설정 후 Claude Advisor 패턴 구현
+- Sentry/Logfire 도입 검토 (Railway 로그 한계 극복)
+- LangGraph 점진적 도입 검토 (agent_runner.py 연계)
+
+### ⚠️ 주의사항
+- PostgreSQL MCP는 DATABASE_URL 환경변수 필요 — Railway에서 자동 설정됨
+- structlog JSON 출력으로 Railway 로그 필터링 용이해짐
+
+---
+
 ## 2026-04-19 | 개발일지 자동화 시스템 도입
 
 ### 💡 결정 사항
