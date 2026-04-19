@@ -256,6 +256,7 @@ Telethon (멤버 수집용):
 2. **Copilot 전용 설정:** `.github/copilot-instructions.md`가 CLAUDE.md를 미러링.
 3. **분기 전략:** Copilot은 항상 PR 경유 → Claude Code 복귀 시 충돌 없음.
 4. **Autopus 비활성 시:** `.codex/` 설정은 참조용으로만 유지, 실행 의존성 없음.
+5. **동기화 규칙:** CLAUDE.md 변경 시 `copilot-instructions.md`도 반드시 갱신할 것.
 
 ---
 
