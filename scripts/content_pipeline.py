@@ -57,7 +57,7 @@ async def run_scrape_and_rewrite() -> int:
 
     # 2. 중복 필터 + 리라이팅 + 저장
     saved_count = 0
-    max_save = 10  # 한 번에 최대 저장 수
+    max_save = settings.batch_size  # 설정에서 한 번에 최대 저장 수 참조
 
     for item in scraped:
         if saved_count >= max_save:

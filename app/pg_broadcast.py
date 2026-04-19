@@ -995,7 +995,7 @@ def count_today_posted_content() -> int:
             cur.execute("""
                 SELECT COUNT(*) FROM channel_content
                 WHERE status = 'posted'
-                  AND DATE(posted_at AT TIME ZONE 'UTC') = CURRENT_DATE
+                  AND DATE(posted_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
             """)
             count = cur.fetchone()[0]
             cur.close()

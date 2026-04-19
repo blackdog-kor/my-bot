@@ -114,7 +114,7 @@ async def scrape_channel_content(
                 else:
                     media_type = "document"
 
-        text = msg.text or msg.message or ""
+        text = msg.text or ""
         if not text and media_type == "text":
             continue  # 텍스트도 미디어도 없으면 skip
 
@@ -160,7 +160,7 @@ async def scrape_all_sources() -> list[dict[str, Any]]:
     try:
         await client.start()
         me = await client.get_me()
-        logger.info("Telethon 연결 성공: %s (id=%d)", me.username, me.id)
+        logger.info("Telethon 연결 성공: %s (id=%d)", me.username or "N/A", me.id)
 
         channels = _get_source_channels()
         for ch in channels:
