@@ -112,3 +112,21 @@ To prevent conflicts:
 3. **Both agents read CLAUDE.md** as the source of truth for project rules.
 4. **File ownership:** No exclusive locks — both agents can modify any file.
 5. **Conflict resolution:** If a PR has conflicts, rebase onto latest main.
+
+---
+
+## Development Log Rules (MUST FOLLOW)
+
+Both AI agents must follow these logging rules to prevent knowledge loss:
+
+1. **Session start:** Record today's goal at the top of `DEVLOG.md`
+2. **Important decisions:** Log immediately to `DEVLOG.md` (technology choices, architecture changes)
+3. **Session end:** Add change summary + next steps to `DEVLOG.md`
+4. **TODO updates:** Check off completed items in `TODO.md` (`[x]`), add new items when discovered
+
+### File roles:
+| File | Purpose | Update frequency |
+|------|---------|-----------------|
+| `DEVLOG.md` | Dev journal (preserves decision rationale) | Every session |
+| `TODO.md` | Sequential task checklist | On task completion/discovery |
+| `ROADMAP.md` | Long-term roadmap (Phases) | On phase transitions |
