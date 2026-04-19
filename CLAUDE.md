@@ -1,3 +1,4 @@
+
 # CLAUDE.md — 프로젝트 참조 문서
 
 이 파일은 Claude Code가 이 프로젝트를 작업할 때 반드시 먼저 읽어야 한다.
@@ -270,3 +271,47 @@ Telethon (멤버 수집용):
 - 전세계 개발자들이 만든 마케팅/자동화 툴 적극 통합
 - 자체 코드 수정보다 검증된 라이브러리/툴 교체 우선
 - 최신 기술 트렌드 반영이 기본 방향
+
+
+<!-- AUTOPUS:BEGIN -->
+# Autopus-ADK Harness
+
+> 이 섹션은 Autopus-ADK에 의해 자동 생성됩니다. 수동으로 편집하지 마세요.
+
+- **프로젝트**: my-bot
+- **모드**: full
+- **플랫폼**: claude-code, codex
+
+## 설치된 구성 요소
+
+- Rules: .claude/rules/autopus/
+- Skills: .claude/skills/autopus/
+- Commands: .claude/skills/auto/SKILL.md
+- Agents: .claude/agents/autopus/
+
+## Language Policy
+
+IMPORTANT: Follow these language settings strictly for all work in this project.
+
+- **Code comments**: Write all code comments, docstrings, and inline documentation in English (en)
+- **Commit messages**: Write all git commit messages in English (en)
+- **AI responses**: Respond to the user in English (en)
+
+## Core Guidelines
+
+### Subagent Delegation
+
+IMPORTANT: Use subagents for complex tasks that modify 3+ files, span multiple domains, or exceed 200 lines of new code. Define clear scope, provide full context, review output before integrating.
+
+### File Size Limit
+
+IMPORTANT: No source code file may exceed 300 lines. Target under 200 lines. Split by type, concern, or layer when approaching the limit. Excluded: generated files (*_generated.go, *.pb.go), documentation (*.md), and config files (*.yaml, *.json).
+
+### Code Review
+
+During review, verify:
+- No file exceeds 300 lines (REQUIRED)
+- Complex changes use subagent delegation (SUGGESTED)
+- See .claude/rules/autopus/ for detailed guidelines
+
+<!-- AUTOPUS:END -->

@@ -1,0 +1,287 @@
+---
+name: auto-plan
+description: >
+  SPEC 작성 — 코드베이스 분석 후 EARS 요구사항, 구현 계획, 인수 기준을 생성합니다
+---
+
+# auto-plan — SPEC 작성 스킬
+
+## Codex Invocation
+
+You can invoke this workflow through any of these compatible surfaces:
+
+- `@auto plan ...` — preferred when the local Autopus plugin is installed
+- `$auto-plan ...` — direct repository skill invocation
+- `$auto plan ...` — via the router skill
+
+Load and follow any helper documents referenced from this file under `.codex/skills/` and `.codex/rules/autopus/`.
+
+
+## Autopus Branding
+
+When handling this workflow, start the response with the canonical banner from `templates/shared/branding-formats.md.tmpl`:
+
+```text
+🐙 Autopus ─────────────────────────
+```
+
+End the completed response with `🐙`.
+
+
+**프로젝트**: my-bot | **모드**: full
+
+## 설명
+
+단순 템플릿 생성이 아닌, 실제 코드베이스를 분석하고 컨텍스트를 수집한 후 SPEC 문서를 생성합니다.
+요구사항을 EARS 형식으로 분해하고 기술 설계를 수행합니다.
+
+## 사용법
+
+```
+@auto plan "기능 설명"
+@auto plan "기능 설명" --skip-prd
+@auto plan "기능 설명" --prd-mode minimal
+@auto plan --from-idea BS-001 --target autopus-adk
+```
+
+### 플래그
+
+| Flag | Description |
+|------|-------------|
+| `--from-idea <BS-ID>` | 브레인스토밍 결과를 컨텍스트로 사용합니다. |
+| `--skip-prd` | PRD 생성 건너뛰고 바로 SPEC 작성. MEDIUM 난이도 권장. |
+| `--prd-mode <mode>` | PRD 모드: `standard` (10섹션, 기본값) 또는 `minimal` (5섹션). |
+| `--strategy <value>` | 멀티 프로바이더 리뷰 전략. `--multi`와 함께 사용합니다. |
+| `--target <module>` | SPEC 저장 대상 모듈을 강제합니다. |
+
+### 공통 플래그
+
+- `--auto`: 확인 단계 생략
+- `--multi`: SPEC 생성 후 멀티 프로바이더 리뷰 활성화
+- `--quality <mode>`: 하위 에이전트 품질 모드 지정
+
+## Codex 기본 실행 모델
+
+- Codex에서는 `plan`도 `spawn_agent(...)` 기반 subagent-first로 진행합니다.
+- 메인 세션은 최종 SPEC 구조, 게이트 판단, 저장을 담당합니다.
+- 코드베이스 스캔, 레퍼런스 탐색, 초안 작성은 `explorer`, `planner`, `spec-writer` 같은 서브에이전트로 분담합니다.
+- 현재 Codex 런타임 정책이 암묵적 `spawn_agent(...)` 호출을 제한하면, 하네스 기본값과 제약을 명시적으로 알린 뒤 사용자에게 서브에이전트 진행 여부 또는 `--solo` 성격의 단일 세션 진행을 확인받습니다.
+- 단순한 한 파일 수준 문서 작업이면 메인 세션에서 직접 처리할 수 있습니다.
+
+전체 라우팅/리뷰게이트 규칙은 `@auto plan ...` 라우터를 우선합니다.
+
+## 실행 순서
+
+### Step 1: 플래그 파싱
+
+다음 plan 전용 플래그를 먼저 해석합니다.
+- `--from-idea <BS-ID>` → brainstorm 컨텍스트 로드
+- `--skip-prd`
+- `--prd-mode <mode>`
+- `--strategy <value>`
+- `--target <module>`
+- 글로벌 `--multi` / `--auto` / `--quality`
+
+### Step 1.5: PRD 생성 (조건부)
+
+`--skip-prd`가 없으면 PRD를 먼저 생성합니다.
+
+- `--prd-mode`가 없으면 범위를 보고 자동 선택합니다.
+  - 단일 패키지 / 소규모 변경 → `minimal`
+  - 멀티 패키지 / 신규 기능 / API 설계 → `standard`
+- PRD는 planner 역할의 서브에이전트가 생성합니다.
+- 이 단계에서 만들어진 SPEC-ID는 이후 `spec-writer`가 반드시 재사용합니다.
+
+### Step 2: spec-writer 실행
+
+- `--from-idea`가 있으면 `.autopus/brainstorms/BS-{ID}.md`를 찾아 컨텍스트에 포함합니다.
+- Step 1.5에서 PRD를 생성했다면 PRD 경로와 SPEC-ID를 함께 넘깁니다.
+- `spec-writer` 결과에서 SPEC-ID를 추출하고, PRD 단계에서 이미 만든 SPEC-ID가 있으면 동일 ID를 유지합니다.
+
+### Step 3: 리뷰 게이트 판단
+
+다음 둘 중 하나라도 참이면 리뷰 게이트를 실행합니다.
+- `--multi`가 설정됨
+- `autopus.yaml`의 `spec.review_gate.enabled` 가 `true`
+
+### Step 4: Multi-Provider Review (조건부)
+
+리뷰 게이트가 활성화되면 아래 명령을 실행합니다.
+
+```bash
+auto spec review {SPEC-ID} --strategy {STRATEGY}
+```
+
+처리 규칙:
+- `PASS` → SPEC 상태를 `approved`로 갱신
+- `REVISE` → 수정 후 최대 2회 재검토
+- `REJECT` → finding을 출력하고 재설계를 안내
+- review 실행 자체가 실패하면 경고를 출력하고 상태는 `draft`로 유지
+
+### Pre-Completion Verification
+
+- [ ] Step 1: 플래그 파싱 완료
+- [ ] Step 1.5: PRD 생성 완료 또는 의도적 skip
+- [ ] Step 2: spec-writer 실행 완료 및 SPEC-ID 추출
+- [ ] Step 3: 리뷰 게이트 여부 판단 완료
+- [ ] Step 4: review 실행 완료 또는 의도적 skip
+
+하나라도 비어 있으면 완료 안내를 출력하지 않습니다.
+
+## 출력
+
+`.autopus/specs/SPEC-{DOMAIN}-{NUMBER}/` 디렉터리에 파일 저장:
+- `prd.md` — PRD 문서 (`--skip-prd` 시 생략)
+- `spec.md` — 메인 SPEC (요구사항 포함)
+- `plan.md` — 구현 계획
+- `acceptance.md` — 인수 기준
+- `research.md` — 리서치 결과 (세션 간 지속)
+
+## SPEC ID 형식
+
+`SPEC-{DOMAIN}-{NUMBER}`
+
+## 요구사항 형식 (EARS)
+
+지원 타입: ubiquitous, event-driven, unwanted, optional, complex
+
+## 7단계 워크플로우
+
+### Step 1: 코드베이스 스캔
+
+대상 코드 영역을 분석합니다.
+
+1. 관련 파일과 함수를 탐색합니다
+2. 기존 패턴, 의존성, 데이터 흐름을 파악합니다
+3. 유사한 기존 구현(reference implementation)을 찾습니다
+4. 발견 내용을 기록합니다 (이후 단계에서 참조)
+
+### Step 1.5: PRD 생성 (조건부)
+
+`--skip-prd`가 설정되지 않은 경우, SPEC 작성 전에 PRD를 생성합니다.
+
+- **Standard 모드** (11섹션): 새 기능, cross-team, 공개 API — `templates/shared/prd-standard.md.tmpl`
+  - Discovery Q&A 체크리스트, Job Stories/User Stories 듀얼 포맷, Pre-mortem 포함
+- **Minimal 모드** (6섹션): 소규모 변경, 내부 도구 — `templates/shared/prd-minimal.md.tmpl`
+  - Quick Discovery Check, Pre-mortem (Quick) 포함
+
+PRD는 `.autopus/specs/SPEC-{ID}/prd.md`에 저장되며, 이후 SPEC 작성 시 컨텍스트로 활용됩니다.
+
+`--skip-prd` 설정 시 이 단계를 건너뜁니다.
+
+### SPEC 문서 스캐폴딩
+
+`auto spec new` 명령어로 SPEC 디렉터리와 4개 파일을 자동 생성합니다.
+
+```bash
+auto spec new {DOMAIN}-{NUMBER} --title "기능 제목"
+```
+
+이 명령어는 `.autopus/specs/SPEC-{ID}/` 디렉터리에 spec.md, plan.md, acceptance.md, research.md 4개 파일을 생성합니다.
+이후 Steps에서 각 파일의 내용을 채웁니다.
+
+
+### Step 2: Lore 컨텍스트 확인
+
+```bash
+auto lore context <target-path>
+```
+
+확인 사항:
+- **Rejected 트레일러**: 거부된 접근 방식 → 동일 방식 재시도 금지
+- **Constraint 트레일러**: 활성 제약 조건 → 반드시 준수
+- **90일+ 의사결정**: 스탤(stale) 여부 검토
+
+### Step 3: 아키텍처 검증
+
+```bash
+auto arch enforce
+```
+
+확인 사항:
+- 대상 영역의 의존성 위반 여부
+- 새 기능이 준수해야 할 레이어 경계
+- 현재 아키텍처 위반이 있다면 SPEC에 명시
+
+
+### Step 4: EARS 요구사항 작성
+
+Step 1에서 발견한 실제 코드 엔티티를 기반으로 요구사항을 작성합니다.
+
+**EARS 형식**:
+- `The system shall [action]` — 항상 적용 (Ubiquitous)
+- `WHEN [trigger] THEN the system shall [action]` — 트리거 기반 (Event-driven)
+- `WHILE [state] the system shall [action]` — 상태 의존 (State-driven)
+- `IF [condition] THEN the system shall [response]` — 실패 처리 (Unwanted)
+- `WHERE [feature] is enabled the system shall [action]` — 선택적 (Optional)
+
+### Step 5: 구현 계획 (plan.md)
+
+`.autopus/specs/SPEC-{ID}/plan.md` 파일을 생성합니다:
+- 파일 영향 분석 (생성/수정/삭제될 파일 목록)
+- 아키텍처 레이어 정렬
+- 위험도 평가 및 완화 방안
+- 의존성 목록 (선행 작업, 외부 의존성)
+
+### Step 6: 인수 기준 (acceptance.md)
+
+`.autopus/specs/SPEC-{ID}/acceptance.md` 파일을 생성합니다.
+
+Step 1에서 발견한 실제 코드 동작을 기반으로 작성합니다:
+```
+Given [실제 초기 상태]
+When  [트리거 이벤트]
+Then  [예상 결과]
+```
+
+포함 항목:
+- 정상 경로(Happy Path) 시나리오
+- 엣지 케이스 및 경계 조건
+- 에러 시나리오
+- 품질 게이트 기준 (커버리지 목표: 85%+)
+
+### Step 7: 리서치 결과 저장 (research.md)
+
+`.autopus/specs/SPEC-{ID}/research.md` 파일을 생성합니다.
+
+Steps 1-3에서 발견한 모든 내용을 저장합니다.
+이 파일은 세션 간 컨텍스트를 유지하는 핵심 아티팩트입니다.
+
+
+## Full 모드 추가 항목
+
+- 아키텍처 레이어 영향 분석
+- 방법론(tdd) 기반 구현 계획
+- Lore 의사결정 이력 연계
+- 예상 테스트 커버리지 목표: 85%+
+
+
+## Branding Formats
+
+### Workflow Lifecycle (show after plan completes)
+
+```
+🐙 Workflow: {SPEC-ID}
+  ● plan  →  ○ go  →  ○ sync
+```
+
+Status symbols: `●` current stage, `✓` completed, `○` pending.
+
+### Agent Result Format (use for spec-writer subagent result)
+
+```
+🐙 spec-writer ──────────────────────
+  SPEC: {SPEC-ID} | 파일: 4개 | 요구사항: {N}개
+  다음: @auto go {SPEC-ID}
+```
+
+### Next Step Auto-Detection (show after completion)
+
+```
+다음 단계: {recommendation}
+```
+
+Detection order:
+1. No project docs → `📁 프로젝트 컨텍스트가 없습니다. @auto setup 을 실행하세요.`
+2. SPEC status `draft` → `SPEC {SPEC-ID} 생성됨 (status: draft)` + `@auto go {SPEC-ID}` 및 `@auto spec review {SPEC-ID}`
+3. SPEC status `approved` → `✓ SPEC {SPEC-ID} approved` + `@auto go {SPEC-ID}`

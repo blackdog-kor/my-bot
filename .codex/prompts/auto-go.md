@@ -1,0 +1,54 @@
+---
+description: "SPEC 구현 — SPEC 문서를 기반으로 코드를 구현합니다"
+---
+
+# auto-go — SPEC 구현
+
+**프로젝트**: my-bot | **모드**: full
+
+## 사용법
+
+SPEC-ID를 인자로 받아 구현을 실행합니다.
+
+공통 플래그 의미는 `@auto go ...` 라우터를 우선합니다:
+- `--continue`
+- `--team`
+- `--solo`
+- `--auto`
+- `--loop`
+- `--multi`
+- `--quality <mode>`
+
+## 구현 절차
+
+1. RED: 실패 테스트 작성
+2. GREEN: 최소 구현으로 통과
+3. REFACTOR: 코드 개선
+
+## Supervisor Checklist
+
+- Step 0: 먼저 현재 요청이 read-heavy 탐색인지, write-heavy 구현인지 분류합니다
+- 파일 소유권이 겹치지 않을 때만 병렬 executor를 사용합니다
+- worker를 스폰할 때는 owned paths, 수정 금지 범위, verification, next required step을 명시합니다
+- validation 실패 시 전체 파이프라인을 다시 돌리지 말고 실패한 slice만 좁혀서 재시도합니다
+- review는 discovery와 verification을 분리합니다. `--multi` 추가 검증은 review discovery 단계에만 집중합니다
+- 종료 전에는 다음 필수 단계가 완료됐는지, 아니면 명시적 blocker가 남았는지 확인합니다
+
+## 품질 기준
+
+- 테스트 커버리지: 85%+
+- LSP 에러: 0
+- 린트 에러: 0
+- 파일 크기 제한: 소스 파일 300줄 이하
+
+## 실패 시
+
+- `--continue` 플래그로 중단점에서 재개
+- 개별 이슈는 `auto-fix`로 수정
+- Codex의 기본 구현 모드는 `spawn_agent(...)` 기반 subagent pipeline입니다
+- Codex에서 `--auto`는 기본 subagent pipeline 진행에 대한 명시적 승인입니다
+- `--auto`가 없고 현재 Codex 런타임 정책이 암묵적 `spawn_agent(...)` 호출을 제한하면, 조용히 단일 세션으로 폴백하지 말고 하네스 기본값과 제약을 명시적으로 설명한 뒤 사용자에게 서브에이전트 진행 여부 또는 `--solo` 선택을 받습니다
+- SPEC 상태가 `draft`이고 review gate가 활성화돼 있으면 구현을 시작하지 않고 `@auto spec review {SPEC-ID}` 를 먼저 안내합니다
+- 상세 파이프라인 단계와 phase/gate 계약은 `.codex/skills/agent-pipeline.md`를 따릅니다
+- `--team`은 future native multi-agent surface를 위한 reserved compatibility flag입니다
+- `--multi`는 reviewer/security-auditor/orchestra 기반 추가 검증을 요청하는 의미입니다

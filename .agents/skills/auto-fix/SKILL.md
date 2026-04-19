@@ -1,0 +1,86 @@
+---
+name: auto-fix
+description: >
+  버그 수정 — 재현과 최소 수정 중심으로 문제를 해결합니다
+---
+
+# auto-fix — 버그 수정 스킬
+
+## Codex Invocation
+
+You can invoke this workflow through any of these compatible surfaces:
+
+- `@auto fix ...` — preferred when the local Autopus plugin is installed
+- `$auto-fix ...` — direct repository skill invocation
+- `$auto fix ...` — via the router skill
+
+Load and follow any helper documents referenced from this file under `.codex/skills/` and `.codex/rules/autopus/`.
+
+
+## Autopus Branding
+
+When handling this workflow, start the response with the canonical banner from `templates/shared/branding-formats.md.tmpl`:
+
+```text
+🐙 Autopus ─────────────────────────
+```
+
+End the completed response with `🐙`.
+
+
+**프로젝트**: my-bot | **모드**: full
+
+## 설명
+
+버그를 재현하고 최소한의 변경으로 수정합니다. 재현 테스트를 먼저 작성합니다.
+
+## 사용법
+
+```
+@auto fix "버그 설명"
+@auto fix --file path/to/file
+@auto fix "회귀 버그" --auto
+```
+
+### 플래그
+
+| Flag | Description |
+|------|-------------|
+| `--file <path>` | 수정 범위를 특정 파일로 좁힙니다. |
+| `--auto` | 확인 단계 없이 바로 수정 흐름을 진행합니다. |
+
+## 절차
+
+1. 버그 재현 테스트 작성 (먼저)
+2. 테스트 실패 확인
+3. 최소 코드 변경으로 수정
+4. 테스트 통과 확인
+5. 전체 테스트 스위트 실행
+
+## 규칙
+
+- 재현 테스트 없이 수정하지 않음
+- 버그 범위 외 코드 변경 금지
+- 전체 복구/후속 가이드는 `@auto fix ...` 라우터 본문을 우선합니다.
+
+## Branding Formats
+
+### Error Recovery (show on fix failures)
+
+```
+✗ {subcommand} 실패: {error description}
+  복구 옵션:
+  1. 오류 내용을 확인하고 재시도: @auto fix {args}
+  2. @auto doctor  (시스템 상태 진단)
+```
+
+### Next Step Auto-Detection (show after fix completes)
+
+```
+다음 단계: {recommendation}
+```
+
+Detection order:
+1. SPEC status `implemented` → `✓ 구현 완료 → @auto sync {SPEC-ID}`
+2. SPEC status `approved` → `✓ SPEC {SPEC-ID} 승인됨 → @auto go {SPEC-ID}`
+3. No SPEC context → recommend running `@auto review` to verify the fix

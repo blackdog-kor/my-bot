@@ -1,0 +1,146 @@
+---
+name: auto-sync
+description: >
+  문서 동기화 — 구현 이후 SPEC, CHANGELOG, 문서를 반영합니다
+---
+
+# auto-sync — 문서 동기화 스킬
+
+## Codex Invocation
+
+You can invoke this workflow through any of these compatible surfaces:
+
+- `@auto sync ...` — preferred when the local Autopus plugin is installed
+- `$auto-sync ...` — direct repository skill invocation
+- `$auto sync ...` — via the router skill
+
+Load and follow any helper documents referenced from this file under `.codex/skills/` and `.codex/rules/autopus/`.
+
+
+## Autopus Branding
+
+When handling this workflow, start the response with the canonical banner from `templates/shared/branding-formats.md.tmpl`:
+
+```text
+🐙 Autopus ─────────────────────────
+```
+
+End the completed response with `🐙`.
+
+
+**프로젝트**: my-bot | **모드**: full
+
+## 설명
+
+구현 완료 후 코드와 문서를 동기화합니다.
+
+## 사용법
+
+```
+@auto sync SPEC-ID
+@auto sync
+```
+
+## Codex 기본 실행 모델
+
+- Codex에서는 `sync`도 기본적으로 `spawn_agent(...)` 기반 subagent-first를 따릅니다.
+- 메인 세션은 동기화 범위 결정, 최종 상태 갱신, 커밋 판단을 담당합니다.
+- 변경점 검토, 문서 영향 분석, 검증 로그 정리는 필요 시 서브에이전트로 위임합니다.
+- 현재 Codex 런타임 정책이 암묵적 `spawn_agent(...)` 호출을 제한하면, 하네스 기본값과 제약을 명시적으로 알린 뒤 사용자에게 서브에이전트 진행 여부 또는 단일 세션 진행을 확인받습니다.
+- 변경 범위가 작으면 메인 세션에서 직접 마무리할 수 있습니다.
+
+## 동기화 항목
+
+1. SPEC 상태 → completed
+2. API 문서 갱신
+3. 아키텍처 다이어그램 업데이트
+4. Lore 의사결정 기록
+5. CHANGELOG 갱신
+6. Lore 형식 자동 커밋
+
+## 구조 문서 동기화
+
+구조 변경이 감지되면 다음 문서를 함께 갱신합니다.
+- `ARCHITECTURE.md`
+- `.autopus/project/structure.md`
+- `.autopus/project/tech.md`
+- `.autopus/project/product.md`
+
+## @AX Lifecycle Management
+
+동기화 시 코드베이스의 @AX 태그 수명주기를 관리합니다.
+
+### TODO Cycle Tracking
+
+1. `@AX:TODO` 태그를 찾습니다.
+2. `@AX:CYCLE:N` 카운터를 증가시키거나 없으면 `@AX:CYCLE:1`을 추가합니다.
+3. CYCLE이 3 이상이면 `@AX:WARN` 으로 승격하고 이유를 기록합니다.
+
+### ANCHOR Fan-In Verification
+
+1. `@AX:ANCHOR` 태그를 찾습니다.
+2. 함수 참조 수를 grep 기반으로 점검합니다.
+3. caller count가 3 미만이면 `@AX:NOTE` 로 내리고 이유를 갱신합니다.
+
+### NOTE Cleanup
+
+1. 특정 함수/심볼을 참조하는 `@AX:NOTE` 를 찾습니다.
+2. 해당 함수/심볼이 아직 존재하는지 확인합니다.
+3. orphan NOTE는 제거합니다.
+
+## 품질 게이트
+
+- 에러: 0 / 경고: 최대 10
+
+## Lore 커밋
+
+동기화 완료 후 변경 파일을 Lore 형식으로 자동 커밋합니다.
+- SPEC-ID가 있으면: `docs(<scope>): sync SPEC-{ID} 문서 및 상태 갱신`
+- SPEC-ID가 없으면: `docs(sync): 프로젝트 문서 동기화`
+- 구현 코드 포함 시 SPEC 주요 타입(feat, fix 등) 사용
+- 변경 사항 없으면 커밋 생략
+
+### 2-Phase Commit
+
+1. Module repo 커밋: `{TARGET_MODULE}` 내부 SPEC 및 모듈 변경
+2. Meta repo 커밋: 루트 문서(`ARCHITECTURE.md`, `.autopus/project/`, `CHANGELOG.md`)
+
+판단 기준:
+- `{TARGET_MODULE}/` 내부 파일 → module commit
+- 루트 문서 → meta commit
+- 구현 코드가 포함되면 SPEC의 주요 타입(feat/fix/refactor 등) 사용
+- 문서만 바뀌면 `docs` 사용
+
+
+## Branding Formats
+
+### Workflow Lifecycle (show after sync completes)
+
+```
+🐙 Workflow: {SPEC-ID}
+  ✓ plan  →  ✓ go  →  ● sync
+```
+
+### Milestone Celebration (show when full pipeline completes)
+
+```
+╭────────────────────────────────────╮
+│ 🐙 파이프라인 완료!                 │
+│ {SPEC-ID}: {title}                 │
+│ 태스크: N/N | 커버리지: N%          │
+│ 리뷰: {verdict}                    │
+╰────────────────────────────────────╯
+```
+
+Field mappings: `{title}` from spec.md, `N/N` = completed/total tasks, `{verdict}` = `APPROVE` or `N/A`.
+
+### Next Step Auto-Detection (show after sync completes)
+
+```
+다음 단계: {recommendation}
+```
+
+Detection order:
+1. SPEC status `completed` → `🐙 {SPEC-ID} 완료. 다음 기능: @auto plan "기능 설명"`
+2. Other pending SPECs exist → recommend next SPEC to implement
+3. Always append: `배포 후 검증: @auto canary`

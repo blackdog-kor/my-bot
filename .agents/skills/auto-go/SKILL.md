@@ -1,0 +1,239 @@
+---
+name: auto-go
+description: >
+  SPEC 구현 — SPEC 문서를 기반으로 코드를 구현합니다
+---
+
+# auto-go — SPEC 구현 스킬
+
+## Codex Invocation
+
+You can invoke this workflow through any of these compatible surfaces:
+
+- `@auto go ...` — preferred when the local Autopus plugin is installed
+- `$auto-go ...` — direct repository skill invocation
+- `$auto go ...` — via the router skill
+
+Load and follow any helper documents referenced from this file under `.codex/skills/` and `.codex/rules/autopus/`.
+
+
+## Autopus Branding
+
+When handling this workflow, start the response with the canonical banner from `templates/shared/branding-formats.md.tmpl`:
+
+```text
+🐙 Autopus ─────────────────────────
+```
+
+End the completed response with `🐙`.
+
+
+**프로젝트**: my-bot | **모드**: full
+
+## 설명
+
+SPEC 문서를 기반으로 코드를 구현합니다. TDD 방법론을 따릅니다.
+기본 파이프라인 상세 단계는 `.codex/skills/agent-pipeline.md`를 따릅니다.
+
+## 사용법
+
+```
+@auto go SPEC-ID
+@auto go SPEC-ID --continue
+@auto go SPEC-ID --solo --quality ultra
+@auto go SPEC-ID --auto --loop
+```
+
+### 플래그
+
+| Flag | Description |
+|------|-------------|
+| `--continue` | 이전 중단 지점에서 재개합니다. |
+| `--team` | Codex에서는 future native multi-agent를 위한 reserved compatibility flag입니다. 현재는 기본 subagent pipeline을 계속 사용합니다. |
+| `--solo` | 서브에이전트 없이 메인 세션에서 직접 구현합니다. |
+| `--strategy <value>` | `--multi` 리뷰 전략을 지정합니다. |
+| `--skip-scaffold` | 초기 테스트 스캐폴딩 단계를 건너뜁니다. |
+
+### 공통 플래그
+
+- `--auto`: 승인/확인 단계 자동 진행. Codex에서는 기본 `spawn_agent(...)` subagent pipeline 진행에 대한 명시적 승인으로도 해석합니다.
+- `--loop`: RALF 재시도 루프 활성화
+- `--multi`: 멀티 프로바이더 리뷰 활성화
+- `--quality <mode>`: 하위 에이전트 품질 모드 지정
+
+## 구현 절차
+
+
+1. RED: 실패 테스트 작성
+2. GREEN: 최소 구현으로 통과
+3. REFACTOR: 코드 개선
+
+
+## 실행 계약
+
+### Step 0: 플래그 파싱
+
+구현 시작 전에 다음 항목을 먼저 확정합니다.
+- `--team` → reserved compatibility flag
+- `--solo` → 단일 세션 구현
+- `--strategy <value>`
+- `--continue`
+- `--skip-scaffold`
+- 글로벌 `--auto` / `--loop` / `--multi` / `--quality`
+
+실행 모드:
+- `--solo` → single session
+- 그 외 → 기본 `spawn_agent(...)` subagent pipeline
+
+### Step 1: SPEC 로드
+
+- SPEC-ID를 해석해 `spec.md` 경로와 대상 모듈을 확정합니다.
+- SPEC 상태가 `draft`이고 `review_gate`가 활성화돼 있으면 구현을 진행하지 않고 `@auto spec review {SPEC-ID}` 를 먼저 안내합니다.
+
+### Step 2: 파이프라인 라우팅
+
+- 기본 경로: `.codex/skills/agent-pipeline.md`에 정의된 subagent pipeline
+- `--solo`: 메인 세션 직접 구현
+- `--team`: 현재는 예약 플래그이며 기본 pipeline 의미를 유지
+
+### Harness-Only Tasks
+
+모든 변경 대상이 `.md` 파일뿐이면:
+- 빌드/테스트 검증을 생략할 수 있습니다.
+- validator는 포맷, frontmatter, 300-line 제한 같은 문서 중심 체크만 수행합니다.
+
+### Pre-Completion Verification
+
+- [ ] Phase 1: Planning 완료
+- [ ] Phase 1.5: Test Scaffold 완료 또는 `--skip-scaffold`
+- [ ] Gate 1: Approval 완료 또는 `--auto`
+- [ ] Phase 1.8: Doc Fetch 완료 또는 skip
+- [ ] Phase 2: Implementation 완료
+- [ ] Gate 2: Validation PASS
+- [ ] Phase 2.5: Annotation 완료
+- [ ] Phase 3: Testing 완료 또는 harness-only skip
+- [ ] Gate 3: Coverage 확인 완료 또는 N/A
+- [ ] Phase 4: Review APPROVE
+
+하나라도 비어 있으면 sync 단계 안내로 넘어가지 않습니다.
+
+## 품질 기준
+
+- 테스트 커버리지: 85%+
+- LSP 에러: 0
+- 린트 에러: 0
+
+## Subagent Delegation
+
+When a task modifies 3+ files, exceeds 200 lines, or spans multiple domains, delegate to specialized agents using `spawn_agent`.
+
+### Executor Agent
+
+```
+spawn_agent executor \
+  --task "Implement {task description}" \
+  --spec ".autopus/specs/{SPEC-ID}/spec.md" \
+  --plan ".autopus/specs/{SPEC-ID}/plan.md" \
+  --constraint "File size limit: 300 lines per source file"
+```
+
+### Tester Agent
+
+```
+spawn_agent tester \
+  --task "Write tests for {scope}" \
+  --spec ".autopus/specs/{SPEC-ID}/acceptance.md" \
+  --coverage-target 85
+```
+
+### Reviewer Agent
+
+```
+spawn_agent reviewer \
+  --task "Review implementation for {SPEC-ID}" \
+  --criteria "TRUST-5"
+```
+
+### Delegation Rules
+
+- Define clear scope with expected output for each agent
+- Include SPEC context files in the agent prompt
+- Review agent output before integrating
+- Use parallel delegation for independent subtasks
+- Maximum 3 sequential agent chains
+
+## Multi-Provider 모드
+
+`--multi` 플래그로 멀티 프로바이더 오케스트레이션을 활성화합니다:
+
+```bash
+auto orchestra run "{review topic}" --strategy consensus --rounds fast
+```
+
+서브프로세스 모드가 자동 적용되며, 여러 AI 프로바이더의 합의 기반 리뷰를 수행합니다.
+
+## Codex Notes
+
+- Codex의 기본 구현 모드는 `spawn_agent(...)` 기반 subagent pipeline입니다.
+- Codex에서 `--auto`는 기본 subagent pipeline 진행에 대한 명시적 승인입니다.
+- `--auto`가 없고 현재 Codex 런타임 정책이 암묵적 `spawn_agent(...)` 호출을 제한하면, 조용히 단일 세션으로 폴백하지 말고 하네스 기본값과 제약을 사용자에게 명시적으로 설명한 뒤 서브에이전트 opt-in 또는 `--solo` 선택을 받습니다.
+- `--team`은 future native multi-agent surface를 위한 reserved compatibility flag이며, 현재 Codex에서는 추가 오케스트레이션 의미를 부여하지 않습니다.
+- `--multi`는 구현 이후 reviewer / security-auditor / orchestra 리뷰를 추가로 붙이는 강화 모드입니다.
+- 전체 파이프라인 단계, 재시도 한도, 게이트 규칙은 `@auto go ...` 라우터 본문을 우선합니다.
+
+## Branding Formats
+
+### Pipeline Progress (show at Phase transitions)
+
+```
+🐙 Pipeline ─────────────────────────
+  ✓ Phase 1: Planning
+  → Phase 2: Implementation [N/M tasks]
+  ○ Phase 3: Testing
+  ○ Phase 4: Review
+```
+
+Status symbols: `✓` completed, `→` active, `○` pending. Replace `[N/M tasks]` with actual counts.
+
+### Workflow Lifecycle (show after go completes)
+
+```
+🐙 Workflow: {SPEC-ID}
+  ✓ plan  →  ● go  →  ○ sync
+```
+
+다음 단계: `@auto sync {SPEC-ID}`
+
+### Agent Result Format (use for executor/tester subagent results)
+
+executor:
+```
+🐙 executor ─────────────────────────
+  파일: {N}개 수정 | 테스트: {N}개 추가 | 커버리지: {N}%
+  다음: 검증 단계로 진행
+```
+
+tester:
+```
+🐙 tester ───────────────────────────
+  테스트: {N}개 추가 | 커버리지: {before}% → {after}% | 통과: {N}/{N}
+  다음: 리뷰 단계로 진행
+```
+
+### Error Recovery (show on failures)
+
+Validation failure:
+```
+✗ Validation 실패: {N}개 이슈 발견
+  복구 옵션:
+  1. @auto go {SPEC-ID} --continue  (중단점에서 재개)
+  2. @auto fix "{specific issue}"   (개별 이슈 수정)
+```
+
+Subagent failure:
+```
+✗ {agent-name} 실패: {error description}
+  복구 옵션:
+  1. @auto go {SPEC-ID} --continue  (파이프라인 재개)
+  2. {manual fallback instruction}  (수동 처리)
+```

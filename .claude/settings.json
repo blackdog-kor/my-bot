@@ -1,0 +1,93 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "auto react check --quiet",
+            "timeout": 60,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 /workspaces/my-bot/scripts/gpt4o_hook.py",
+            "timeout": 60,
+            "type": "command"
+          }
+        ],
+        "matcher": "Write"
+      },
+      {
+        "hooks": [
+          {
+            "command": "python3 /workspaces/my-bot/scripts/gpt4o_hook.py",
+            "timeout": 60,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "auto check --arch --quiet --warn-only",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "/workspaces/my-bot/.claude/hooks/autopus/hook-claude-stop.sh",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Bash(auto *)",
+      "Bash(auto:*)",
+      "Bash(git *)",
+      "Bash(git:*)",
+      "Bash(make:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(mkdir:*)",
+      "Bash(echo:*)",
+      "Bash(gh:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "WebSearch",
+      "Agent",
+      "AskUserQuestion",
+      "TaskCreate",
+      "TaskUpdate",
+      "TeamCreate",
+      "SendMessage",
+      "ToolSearch"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "statusLine": {
+    "command": ".claude/statusline.sh",
+    "padding": 1,
+    "type": "command"
+  }
+}

@@ -1,0 +1,78 @@
+---
+name: auto-review
+description: >
+  코드 리뷰 — TRUST 5 기준으로 변경된 코드를 리뷰합니다
+---
+
+# auto-review — 코드 리뷰 스킬
+
+## Codex Invocation
+
+You can invoke this workflow through any of these compatible surfaces:
+
+- `@auto review ...` — preferred when the local Autopus plugin is installed
+- `$auto-review ...` — direct repository skill invocation
+- `$auto review ...` — via the router skill
+
+Load and follow any helper documents referenced from this file under `.codex/skills/` and `.codex/rules/autopus/`.
+
+
+## Autopus Branding
+
+When handling this workflow, start the response with the canonical banner from `templates/shared/branding-formats.md.tmpl`:
+
+```text
+🐙 Autopus ─────────────────────────
+```
+
+End the completed response with `🐙`.
+
+
+**프로젝트**: my-bot | **모드**: full
+
+## 설명
+
+변경된 코드를 TRUST 5 기준으로 리뷰합니다.
+
+## 사용법
+
+```
+@auto review
+@auto review path/to/file
+@auto review HEAD~3..HEAD
+```
+
+## 실행 원칙
+
+- TRUST 5 분석 전에 자동화 게이트를 먼저 실행합니다.
+- 개별 스킬 호출보다 `@auto review ...` 라우터 호출을 우선하며, 해당 라우터의 검증 순서를 그대로 따릅니다.
+- 발견 사항은 severity 순으로 정리하고 `REQUEST_CHANGES` 시 `@auto go {SPEC-ID} --continue` 를 권장합니다.
+
+## TRUST 5 기준
+
+- **T**ested: 커버리지 85%+
+- **R**eadable: 명확한 네이밍, 린트 클린
+- **U**nderstandable: 문서화, 복잡도 수용
+- **S**ecured: OWASP 준수, 입력 검증
+- **T**rackable: Conventional Commits, 이슈 참조
+
+## Branding Formats
+
+### Agent Result Format (use for reviewer subagent result)
+
+```
+🐙 reviewer ─────────────────────────
+  Verdict: {APPROVE|REQUEST_CHANGES} | Issues: {N}개 | 심각도: {low|medium|high}
+  다음: {verdict-based guidance}
+```
+
+### Next Step Auto-Detection (show after review completes)
+
+```
+다음 단계: {recommendation}
+```
+
+Detection order:
+1. Verdict `APPROVE` + SPEC status `implemented` → `✓ 구현 완료 → @auto sync {SPEC-ID}`
+2. Verdict `REQUEST_CHANGES` → recommend `@auto go {SPEC-ID} --continue` to address issues
+3. SPEC status `completed` → `🐙 {SPEC-ID} 완료. 다음 기능: @auto plan "기능 설명"`
