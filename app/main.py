@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import sys
 import threading
 
@@ -19,6 +20,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 AFFILIATE_URL = os.getenv("AFFILIATE_URL", "https://t.me")
+
+# ── Debug endpoint authentication ────────────────────────────────────────────
+_DEBUG_SECRET = os.getenv("DEBUG_SECRET", "").strip()
+
+
+def _check_debug_auth(request: Request) -> bool:
+    """DEBUG_SECRET 미설정 시 전체 차단, 설정 시 헤더 매칭 확인."""
+    if not _DEBUG_SECRET:
+        return False
+    provided = request.headers.get("X-Debug-Secret", "")
+    return secrets.compare_digest(provided, _DEBUG_SECRET)
 
 
 def _run_bot():
@@ -74,6 +86,12 @@ async def lifespan(app: FastAPI):
         ensure_campaign_config_table()
     except Exception as e:
         logger.warning("ensure_campaign_config_table: %s", e)
+
+    try:
+        from app.pg_broadcast import ensure_discovered_groups_table
+        ensure_discovered_groups_table()
+    except Exception as e:
+        logger.warning("ensure_discovered_groups_table: %s", e)
 
     try:
         from app.affiliate_tracker import ensure_affiliate_stats_table
@@ -235,8 +253,10 @@ def railway_mcp_info(request: Request):
 
 
 @app.get("/debug/routes")
-def debug_routes():
+def debug_routes(request: Request):
     """현재 FastAPI에 등록된 모든 라우트 목록 반환 — 엔드포인트 존재 여부 확인용."""
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     return {
         "routes": [
             {"path": r.path, "methods": list(r.methods)}
@@ -247,8 +267,10 @@ def debug_routes():
 
 
 @app.get("/debug/run-group-finder")
-async def debug_run_group_finder():
+async def debug_run_group_finder(request: Request):
     """group_finder.py 수동 실행 트리거 (테스트용)"""
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     import subprocess, sys
     from pathlib import Path
     ROOT = Path(__file__).resolve().parents[1]
@@ -270,8 +292,10 @@ async def debug_run_group_finder():
 
 
 @app.get("/debug/run-member-scraper")
-async def debug_run_member_scraper():
+async def debug_run_member_scraper(request: Request):
     """member_scraper.py 수동 실행 트리거 (테스트용)"""
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     import subprocess, sys
     from pathlib import Path
     ROOT = Path(__file__).resolve().parents[1]
@@ -303,13 +327,15 @@ def track(ref: str):
 
 
 @app.get("/debug/dm-test")
-async def debug_dm_test(username: str = "", user_id: int = 0):
+async def debug_dm_test(request: Request, username: str = "", user_id: int = 0):
     """
     테스트 DM 발송. username 또는 user_id 중 하나를 지정.
     - /debug/dm-test?username=yourname
     - /debug/dm-test?user_id=123456789
     둘 다 지정 시 user_id 우선 사용.
     """
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not username and not user_id:
         return {
             "error": "username 또는 user_id 파라미터가 필요합니다.",
@@ -397,8 +423,10 @@ async def debug_dm_test(username: str = "", user_id: int = 0):
 
 
 @app.get("/debug/session-test")
-async def debug_session_test():
+async def debug_session_test(request: Request):
     """각 SESSION_STRING으로 Pyrogram 연결을 시도하고 성공/실패 결과를 반환."""
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     import asyncio
 
     api_id   = int(os.getenv("API_ID",   "0") or "0")
@@ -461,7 +489,9 @@ async def debug_session_test():
 
 
 @app.get("/debug/status")
-async def debug_status():
+async def debug_status(request: Request):
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     # 1. campaign_posts 확인
     try:
         from app.pg_broadcast import list_posts

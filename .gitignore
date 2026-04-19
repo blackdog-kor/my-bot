@@ -220,4 +220,8 @@ GEMINI.md
 # Local databases
 data/*.db
 data/*.db-journal
+
+# Sensitive data files (session strings, credentials)
+data/*.txt
+
 .playwright-mcp/

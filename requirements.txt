@@ -20,3 +20,6 @@ crawl4ai==0.8.6
 langchain-openai
 playwright
 openai
+tenacity>=9.0.0
+pydantic-settings>=2.7.0
+structlog>=24.4.0
