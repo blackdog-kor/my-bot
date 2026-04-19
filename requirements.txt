@@ -13,3 +13,8 @@ lxml
 google-generativeai
 scrapling[fetchers]
 anthropic>=0.40.0
+browser-use==0.12.6
+nodriver==0.48.1
+curl_cffi==0.15.0
+crawl4ai==0.8.6
+langchain-openai

@@ -129,6 +129,13 @@ def _job_warmup() -> None:
         _notify("🏋️ 워밍업 Job 완료" if ok else "🏋️ 워밍업 Job 실패")
 
 
+def _job_1win_collector() -> None:
+    with _job_lock:
+        _notify("📊 1win 통계 수집 Job 시작")
+        ok = _run_script("1win_api_collector.py", "1win통계수집")
+        _notify("📊 1win 통계 수집 Job 완료" if ok else "📊 1win 통계 수집 Job 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -166,6 +173,12 @@ def run_scheduler_forever() -> None:
         _job_warmup,
         trigger=CronTrigger(hour=23, minute=0),
         id="warmup",
+    )
+    # 01:00 UTC (10:00 KST) — 1win 파트너 통계 수집 (API 방식)
+    scheduler.add_job(
+        _job_1win_collector,
+        trigger=CronTrigger(hour=1, minute=0),
+        id="1win_collector",
     )
     scheduler.start()
 
