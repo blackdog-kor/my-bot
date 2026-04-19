@@ -1,0 +1,87 @@
+# ROADMAP — 자동화 파이프라인 개발 로드맵
+
+마지막 갱신: 2026-04-19
+
+---
+
+## 개발 철학
+
+> 작은 수정보다 검증된 도구 도입 우선.  
+> 필수 인프라를 먼저 완비하고, 그 위에 자동화를 쌓는다.
+
+---
+
+## Phase 1 — 개발환경 구축 (현재 단계)
+
+**목표**: Claude Code + AI 기술 스택이 완전히 연동된 개발환경
+
+| 항목 | 상태 | 설명 |
+|------|------|------|
+| Autopus-ADK 설치 | ✅ 완료 | `.claude/`, `.codex/`, `.agents/` 구성 |
+| GPT-4o 코드 리뷰 Hook | ✅ 완료 | Write/Edit PostToolUse 자동 리뷰 |
+| Anthropic SDK 설치 | ⬜ 미완 | `pip install anthropic` + requirements.txt |
+| ANTHROPIC_API_KEY 설정 | ⬜ 미완 | Codespace Secrets 등록 필요 |
+| Claude Advisor 구현 | ⬜ 미완 | 토큰 비용 자동 조절 핵심 기능 |
+| OPENAI_API_KEY 검증 | ✅ 완료 | 환경변수 설정됨 |
+| `.playwright-mcp/` 정리 | ⬜ 대기 | gitignore 또는 커밋 결정 필요 |
+
+---
+
+## Phase 2 — AI 기술 스택 완비
+
+**목표**: 모든 AI 모델이 역할에 맞게 분리되고, 비용이 자동 조절되는 구조
+
+| 기능 | 도구 | 역할 |
+|------|------|------|
+| 코드 실행·판단 | Claude Sonnet 4.6 | Executor — 기본 작업 전담 |
+| 전략적 판단 | Claude Opus 4.7 | Advisor — 어려운 결정만 호출 |
+| 코드 리뷰 | GPT-4o | 2nd-pass 자동 리뷰 (완료) |
+| 캡션 개인화 | Gemini → Claude 교체 예정 | DM 메시지 개인화 |
+| 그룹 발굴 | Bright Data SERP | 타겟 그룹 스크래핑 |
+| 멤버 수집 | Telethon | 그룹 멤버 추출 |
+| DM 발송 | Pyrogram | UserBot 직접 발송 |
+
+---
+
+## Phase 3 — 자동화 파이프라인 구축
+
+**목표**: 사람 개입 없이 타겟 발굴 → DM 발송 → 클릭 추적 → 재발송이 완전 자동화
+
+```
+[그룹 발굴 03:00 UTC]
+    ↓ Bright Data SERP
+[멤버 수집 00:00 UTC]
+    ↓ Telethon scraper
+[캡션 생성]
+    ↓ Claude Sonnet (Advisor 패턴으로 비용 조절)
+[DM 발송 06:00 UTC]
+    ↓ Pyrogram UserBot (SESSION_STRING_1~10)
+[클릭 추적]
+    ↓ unique_ref + TRACKING_SERVER_URL
+[미클릭 재발송 12:00 UTC]
+    ↓ retry_sender.py
+[구독봇 유입]
+    ↓ @blackdog_eve_casino_bot
+```
+
+---
+
+## Phase 4 — 완전 자동화 운영
+
+**목표**: Railway 배포 후 무인 운영
+
+- 다중 세션(SESSION_STRING_2~10) 확보 및 warmup
+- Claude Advisor 기반 캡션 A/B 테스트 자동화
+- 클릭률 기반 메시지 자동 최적화
+- 관리자 DM으로 일일 리포트 자동 발송
+
+---
+
+## 다음 즉시 해야 할 작업
+
+1. `ANTHROPIC_API_KEY` → Codespace Secrets 등록
+2. `requirements.txt`에 `anthropic` 추가
+3. `AI_STACK.md` 기준으로 Claude Advisor 구현 (`app/claude_advisor.py`)
+4. Gemini 캡션 → Claude Sonnet + Advisor 패턴으로 교체
+
+참조: [AI_STACK.md](AI_STACK.md)

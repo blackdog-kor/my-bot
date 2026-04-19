@@ -12,3 +12,4 @@ beautifulsoup4
 lxml
 google-generativeai
 scrapling[fetchers]
+anthropic>=0.40.0
