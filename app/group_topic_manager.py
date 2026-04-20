@@ -76,6 +76,12 @@ DEFAULT_TOPICS: list[dict[str, Any]] = [
         "content_type": "general",
         "description": "일반 대화",
     },
+    {
+        "name": "⚽ 스포츠 분석",
+        "icon_color": 0x8EEE98,
+        "content_type": "sports",
+        "description": "경기 일정, 프리뷰, 결과 분석, 순위 업데이트",
+    },
 ]
 
 
@@ -153,6 +159,15 @@ def classify_content(caption: str, file_type: str = "") -> str:
     if any(kw in text for kw in ["공지", "규칙", "안내", "notice", "rule", "변경"]):
         return "announcement"
 
+    # 스포츠 키워드
+    if any(kw in text for kw in [
+        "스포츠", "경기", "프리뷰", "프리미어리그", "라리가", "세리에",
+        "분데스리가", "챔피언스리그", "순위", "sport", "match", "league",
+        "premier", "la liga", "serie a", "bundesliga", "fixture",
+        "베팅", "배당", "축구", "football", "soccer",
+    ]):
+        return "sports"
+
     # 보너스 코드
     if any(kw in text for kw in ["보너스코드", "bonus code", "프로모코드", "promo code", "쿠폰"]):
         return "bonus_code"
@@ -202,7 +217,7 @@ async def post_to_topic(
     # 인라인 버튼 (어필리에이트 링크)
     url = affiliate_url or settings.affiliate_url or settings.vip_url
     keyboard = None
-    if url and content_type in ("promotion", "announcement", "bonus_code"):
+    if url and content_type in ("promotion", "announcement", "bonus_code", "sports"):
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(text=button_text, url=url)]
         ])
