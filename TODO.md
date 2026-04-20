@@ -29,15 +29,20 @@
 
 ## 🔴 즉시 (이번 주)
 
-- [ ] `ANTHROPIC_API_KEY` → Codespace Secrets 등록
-- [ ] `app/claude_advisor.py` 기본 구현 (Sonnet + Opus Advisor 패턴)
-- [ ] Gemini 캡션 → Claude Sonnet 교체 (`app/userbot_sender.py`)
+- [x] `ANTHROPIC_API_KEY` → Codespace Secrets 등록
+- [x] `app/claude_advisor.py` 기본 구현 (Sonnet + Opus Advisor 패턴)
+- [x] Gemini 캡션 → Claude Sonnet 교체 (`app/userbot_sender.py`)
+- [x] **TeraBox 콘텐츠 에이전트 모듈 설계 및 구현** (`app/terabox_agent.py`)
+- [x] **TeraBox 파이프라인 스크립트** (`scripts/terabox_pipeline.py`)
+- [x] **에이전트 시스템에 TeraBox 도구 통합** (`agent_planner`, `agent_tools`)
 - [ ] `.playwright-mcp/` 정리 (gitignore 또는 커밋 결정)
 - [ ] **`CHANNEL_ID` 환경변수 설정** (게시 대상 채널 — 콘텐츠 시스템 가동 필수)
 - [ ] **`OPENAI_API_KEY` 또는 `GEMINI_API_KEY` Railway 환경변수 확인** (리라이팅용)
 - [ ] **`/debug/content-test` 엔드포인트 추가** (수동 파이프라인 테스트)
 - [ ] **콘텐츠 파이프라인 수동 실행 테스트** (Railway 배포 후 확인)
 - [ ] 콘텐츠 소스 채널 목록 확정 (`CONTENT_SCRAPE_SOURCES` 환경변수 — 선택사항)
+- [ ] **`TERABOX_SHARE_URLS` 환경변수 설정** (TeraBox 공유 링크 목록)
+- [ ] **`/debug/terabox-test` 엔드포인트 추가** (TeraBox 에이전트 수동 테스트)
 
 ---
 

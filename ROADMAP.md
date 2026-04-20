@@ -1,6 +1,6 @@
 # ROADMAP — 자동화 파이프라인 개발 로드맵
 
-마지막 갱신: 2026-04-19
+마지막 갱신: 2026-04-20
 
 ---
 
@@ -19,9 +19,9 @@
 |------|------|------|
 | Autopus-ADK 설치 | ✅ 완료 | `.claude/`, `.codex/`, `.agents/` 구성 |
 | GPT-4o 코드 리뷰 Hook | ✅ 완료 | Write/Edit PostToolUse 자동 리뷰 |
-| Anthropic SDK 설치 | ⬜ 미완 | `pip install anthropic` + requirements.txt |
-| ANTHROPIC_API_KEY 설정 | ⬜ 미완 | Codespace Secrets 등록 필요 |
-| Claude Advisor 구현 | ⬜ 미완 | 토큰 비용 자동 조절 핵심 기능 |
+| Anthropic SDK 설치 | ✅ 완료 | `requirements.txt`에 `anthropic>=0.40.0` |
+| ANTHROPIC_API_KEY 설정 | ✅ 완료 | Railway 환경변수 등록 |
+| Claude Advisor 구현 | ✅ 완료 | `app/claude_advisor.py` Sonnet+Opus 패턴 |
 | OPENAI_API_KEY 검증 | ✅ 완료 | 환경변수 설정됨 |
 | `.playwright-mcp/` 정리 | ⬜ 대기 | gitignore 또는 커밋 결정 필요 |
 
@@ -106,6 +106,53 @@
 - Claude Advisor 기반 캡션 A/B 테스트 자동화
 - 클릭률 기반 메시지 자동 최적화
 - 관리자 DM으로 일일 리포트 자동 발송
+
+---
+
+## Phase 2.7 — TeraBox 콘텐츠 에이전트 (신규 🔥)
+
+**목표**: TeraBox 공유 링크에서 대용량 비디오 콘텐츠를 자동 수집하여 채널 콘텐츠 소스 확장
+
+**왜 TeraBox?**
+- 카지노/슬롯 빅윈 영상의 주요 공유 플랫폼 (대용량 무료 호스팅)
+- 공식 API 없음 → browser-use AI 에이전트가 유일한 자동화 방법
+- 기존 에이전트 인프라(agent_runner, web_agent) 위에 자연스럽게 확장
+
+**아키텍처:**
+
+```
+[TeraBox 공유 URL 목록]
+    ↓ TERABOX_SHARE_URLS 환경변수
+[browser-use AI 에이전트 (Layer 3)]
+    ↓ 메타데이터 추출 (파일명, 크기, 썸네일, 다운로드 링크)
+    ↓ 실패 시 → nodriver (Layer 2) 폴백
+[중복 필터링]
+    ↓ channel_content 테이블 중복 체크
+[AI 리라이팅]
+    ↓ Claude Sonnet → OpenAI → Gemini 3단 폴백
+[DB 저장]
+    ↓ channel_content 테이블
+[채널 게시]
+    ↓ Bot API → CHANNEL_ID
+    ↓ 인라인 버튼 (어필리에이트 링크)
+```
+
+**파일 구조:**
+
+| 파일 | 역할 |
+|------|------|
+| `app/terabox_agent.py` | 핵심 에이전트 로직 (수집, 파싱, 다운로드) |
+| `scripts/terabox_pipeline.py` | 스케줄러용 파이프라인 오케스트레이션 |
+| `app/agent_tools.py` | `terabox_agent` 도구 등록 (agent_runner 통합) |
+| `app/agent_planner.py` | 플래너에 TeraBox 도구 추가 |
+
+**스케줄:**
+- 07:00 UTC (16:00 KST) — TeraBox 콘텐츠 수집 (기본 비활성화, `TERABOX_ENABLED=true` 시 활성화)
+
+**환경변수:**
+- `TERABOX_SHARE_URLS` — 쉼표 구분 공유 링크 목록
+- `TERABOX_ENABLED` — 파이프라인 활성화 (기본: false)
+- `TERABOX_COOKIES` — (선택) 비공개 파일 접근용 쿠키
 
 ---
 

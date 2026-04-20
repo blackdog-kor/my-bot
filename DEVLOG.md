@@ -5,6 +5,80 @@
 
 ---
 
+## 2026-04-20 | TeraBox 콘텐츠 에이전트 모듈 구축
+
+### 💡 결정 사항
+- TeraBox는 공식 API 없음 → browser-use AI 에이전트가 유일한 자동화 방법
+- 기존 에이전트 인프라(agent_runner, web_agent, agent_planner, agent_tools) 위에 확장
+- 3-Layer 폴백 구조: browser-use (Layer 3) → nodriver (Layer 2) → curl_cffi (Layer 1, 다운로드)
+- 기본 비활성화 상태로 배포 (`TERABOX_ENABLED=false`) — URL 설정 후 활성화
+- 스케줄: 07:00 UTC (16:00 KST) — 오후 시간대 수집
+
+### 🔧 변경 파일 목록
+- `app/terabox_agent.py` (신규) — TeraBox browser-use 에이전트 핵심 모듈
+  - `extract_terabox_info()` — AI 에이전트로 메타데이터 추출
+  - `extract_terabox_info_nodriver()` — nodriver 폴백
+  - `collect_terabox_content()` — 전체 URL 순회 수집
+  - `download_terabox_file()` — BytesIO 다운로드
+- `scripts/terabox_pipeline.py` (신규) — 스케줄러용 파이프라인 스크립트
+- `app/config.py` — `terabox_share_urls`, `terabox_enabled`, `terabox_cookies` 필드 추가
+- `app/agent_tools.py` — `run_terabox_agent()` 도구 실행기 + TOOL_DISPATCH 등록
+- `app/agent_planner.py` — 플래너 시스템 프롬프트에 `terabox_agent` 도구 추가
+- `app/scheduler.py` — `_job_terabox_pipeline()` Job + 07:00 UTC 스케줄 (비활성화 상태)
+- `TODO.md` — TeraBox 관련 작업 추가 및 완료 체크
+- `ROADMAP.md` — Phase 2.7 (TeraBox 콘텐츠 에이전트) 추가
+- `DEVLOG.md` — 세션 기록
+
+### 📋 다음 할 일
+- `TERABOX_SHARE_URLS` 환경변수에 실제 공유 링크 설정
+- `/debug/terabox-test` 엔드포인트 추가 (수동 테스트)
+- Railway 배포 후 browser-use 에이전트 실행 테스트
+- `TERABOX_ENABLED=true` 설정으로 스케줄 활성화
+- TeraBox 다운로드 → BytesIO → 채널 직접 업로드 연동 (video file_id 캐싱)
+
+### ⚠️ 주의사항
+- browser-use는 OPENAI_API_KEY 필수 (GPT-4o가 에이전트 브레인)
+- TeraBox UI가 자주 변경될 수 있음 → 에이전트 프롬프트 유지보수 필요
+- 비공개 파일은 TERABOX_COOKIES 설정 필요
+- Railway headless 환경에서 browser-use 작동 여부 사전 검증 필요
+
+---
+
+## 2026-04-20 | Claude Advisor 패턴 구현 완료
+
+### 💡 결정 사항
+- ANTHROPIC_API_KEY Railway 등록 완료 → Claude Advisor 패턴 본격 구현
+- Sonnet (Executor) + Opus (Advisor) 2단 구조 확정
+- 캡션 개인화: Claude Sonnet 우선 → Gemini Flash 폴백 (기존 Gemini 전용에서 전환)
+- 콘텐츠 리라이팅: Claude → OpenAI → Gemini 3단 폴백 체인 구축
+- 전략 평가: Opus 우선 → Sonnet 폴백 (고급 분석에만 Opus 사용)
+- 모델명: claude-sonnet-4-5-20250514 (Executor), claude-opus-4-0-20250514 (Advisor)
+
+### 🔧 변경 파일 목록
+- `app/config.py` — `anthropic_api_key` 필드 추가
+- `app/claude_advisor.py` (신규) — 핵심 Claude Advisor 모듈
+  - `generate_caption()` — DM 캡션 개인화 (Sonnet + Gemini 폴백)
+  - `rewrite_content()` — 채널 콘텐츠 리라이팅
+  - `evaluate_strategy()` — 캠페인 전략 평가 (Opus + Sonnet 폴백)
+- `app/userbot_sender.py` — Gemini 직접 호출 → `claude_advisor.generate_caption()` 위임
+- `app/content_rewriter.py` — Claude를 최우선 AI로 추가 (3단 폴백 체인)
+- `AI_STACK.md` — Claude 상태 ✅ 활성으로 갱신
+- `TODO.md` — 완료 항목 체크
+- `DEVLOG.md` — 세션 기록
+
+### 📋 다음 할 일
+- `/debug/session-test` → `/debug/dm-test` 로 실 발송 테스트
+- Claude API 비용 모니터링 대시보드 확인
+- 콘텐츠 파이프라인 Claude 리라이팅 실전 테스트
+- DM 발송 스케줄 활성화 준비 (warmup 완료 후)
+
+### ⚠️ 주의사항
+- Claude API 키 미설정 시 자동으로 Gemini 폴백 — 서비스 중단 없음
+- Opus는 전략 평가(`evaluate_strategy`)에서만 사용 — 비용 절감
+- content_rewriter.py의 `_generate_with_claude`는 `_call_sonnet`을 직접 import — 순환참조 주의
+
+---
+
 ## 2026-04-19 | 채널 콘텐츠 자동화 시스템 구축
 
 ### 💡 결정 사항

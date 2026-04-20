@@ -1,6 +1,6 @@
 # AI_STACK.md — AI 기술 스택 및 토큰 비용 관리
 
-마지막 갱신: 2026-04-19
+마지막 갱신: 2026-04-20
 
 ---
 
@@ -9,9 +9,9 @@
 | 모델 | 환경변수 | 상태 | 용도 |
 |------|----------|------|------|
 | GPT-4o | `OPENAI_API_KEY` | ✅ 작동 중 | 코드 리뷰 Hook |
-| Gemini | `GEMINI_API_KEY` | ✅ 설정됨 | DM 캡션 개인화 |
-| Claude Sonnet 4.6 | `ANTHROPIC_API_KEY` | ⬜ 미설정 | Executor (도입 예정) |
-| Claude Opus 4.7 | `ANTHROPIC_API_KEY` (동일) | ⬜ 미설정 | Advisor (도입 예정) |
+| Gemini | `GEMINI_API_KEY` | ✅ 설정됨 | DM 캡션 폴백 |
+| Claude Sonnet 4.5 | `ANTHROPIC_API_KEY` | ✅ 활성 | Executor (캡션 생성, 리라이팅) |
+| Claude Opus 4 | `ANTHROPIC_API_KEY` (동일) | ✅ 활성 | Advisor (전략 판단) |
 
 ---
 
