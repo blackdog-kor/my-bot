@@ -109,6 +109,53 @@
 
 ---
 
+## Phase 2.7 — TeraBox 콘텐츠 에이전트 (신규 🔥)
+
+**목표**: TeraBox 공유 링크에서 대용량 비디오 콘텐츠를 자동 수집하여 채널 콘텐츠 소스 확장
+
+**왜 TeraBox?**
+- 카지노/슬롯 빅윈 영상의 주요 공유 플랫폼 (대용량 무료 호스팅)
+- 공식 API 없음 → browser-use AI 에이전트가 유일한 자동화 방법
+- 기존 에이전트 인프라(agent_runner, web_agent) 위에 자연스럽게 확장
+
+**아키텍처:**
+
+```
+[TeraBox 공유 URL 목록]
+    ↓ TERABOX_SHARE_URLS 환경변수
+[browser-use AI 에이전트 (Layer 3)]
+    ↓ 메타데이터 추출 (파일명, 크기, 썸네일, 다운로드 링크)
+    ↓ 실패 시 → nodriver (Layer 2) 폴백
+[중복 필터링]
+    ↓ channel_content 테이블 중복 체크
+[AI 리라이팅]
+    ↓ Claude Sonnet → OpenAI → Gemini 3단 폴백
+[DB 저장]
+    ↓ channel_content 테이블
+[채널 게시]
+    ↓ Bot API → CHANNEL_ID
+    ↓ 인라인 버튼 (어필리에이트 링크)
+```
+
+**파일 구조:**
+
+| 파일 | 역할 |
+|------|------|
+| `app/terabox_agent.py` | 핵심 에이전트 로직 (수집, 파싱, 다운로드) |
+| `scripts/terabox_pipeline.py` | 스케줄러용 파이프라인 오케스트레이션 |
+| `app/agent_tools.py` | `terabox_agent` 도구 등록 (agent_runner 통합) |
+| `app/agent_planner.py` | 플래너에 TeraBox 도구 추가 |
+
+**스케줄:**
+- 07:00 UTC (16:00 KST) — TeraBox 콘텐츠 수집 (기본 비활성화, `TERABOX_ENABLED=true` 시 활성화)
+
+**환경변수:**
+- `TERABOX_SHARE_URLS` — 쉼표 구분 공유 링크 목록
+- `TERABOX_ENABLED` — 파이프라인 활성화 (기본: false)
+- `TERABOX_COOKIES` — (선택) 비공개 파일 접근용 쿠키
+
+---
+
 ## 다음 즉시 해야 할 작업
 
 1. `ANTHROPIC_API_KEY` → Codespace Secrets 등록

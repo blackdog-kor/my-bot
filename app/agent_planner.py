@@ -42,12 +42,15 @@ Available tools (use in this preference order — cheapest first):
                      Actions: navigate_authenticated | extract_tokens | is_logged_in | health_check
 5. token_vault     — Read stored auth tokens from database. Args: {service}
 6. db_query        — Query affiliate stats from PostgreSQL. Args: {table, filters}
+7. terabox_agent   — Extract file info from TeraBox share links. Args: {share_url}
+                     Returns: file_name, media_type, file_size, download_url, title
 
 Rules:
 - Start with fetch_api when a direct API endpoint is known.
 - Use api_discovery when auth tokens are needed but not yet stored.
 - Use browser_manager only when login state must be maintained (cookies).
 - Use token_vault before api_discovery to avoid redundant network calls.
+- Use terabox_agent for TeraBox share URLs to extract content metadata.
 - Each step must have a clear expect field describing what success looks like.
 - Output ONLY valid JSON — no explanations outside the JSON block.
 

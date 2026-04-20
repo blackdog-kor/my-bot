@@ -98,6 +98,29 @@ async def run_token_vault(action: str, args: dict) -> dict:
 _ALLOWED_TABLES = frozenset({"affiliate_stats", "broadcast_targets", "campaign_posts", "campaign_config"})
 
 
+async def run_terabox_agent(action: str, args: dict) -> dict:
+    """TeraBox content collection via browser-use AI agent."""
+    share_url = args.get("share_url", action)
+    try:
+        from app.terabox_agent import extract_terabox_info
+        item = await extract_terabox_info(share_url)
+        if item:
+            return {
+                "ok": True,
+                "data": {
+                    "file_name": item.file_name,
+                    "media_type": item.media_type,
+                    "file_size": item.file_size,
+                    "download_url": item.download_url,
+                    "title": item.title,
+                },
+            }
+        return {"ok": False, "error": "Failed to extract TeraBox content info"}
+    except Exception as exc:
+        logger.warning("[agent_tools] terabox_agent failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 async def run_db_query(action: str, args: dict) -> dict:
     """Query affiliate stats from PostgreSQL."""
     import psycopg2
@@ -137,6 +160,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     "browser_manager": run_browser_manager,
     "token_vault":     run_token_vault,
     "db_query":        run_db_query,
+    "terabox_agent":   run_terabox_agent,
 }
 
 

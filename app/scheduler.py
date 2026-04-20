@@ -151,6 +151,13 @@ def _job_group_topic_poster() -> None:
         _notify("📌 그룹 토픽 게시 완료" if ok else "📌 그룹 토픽 게시 실패")
 
 
+def _job_terabox_pipeline() -> None:
+    with _job_lock:
+        _notify("📦 TeraBox 콘텐츠 수집 Job 시작 (browser-use 에이전트)")
+        ok = _run_script("terabox_pipeline.py", "TeraBox콘텐츠(terabox_pipeline)")
+        _notify("📦 TeraBox 콘텐츠 수집 완료" if ok else "📦 TeraBox 콘텐츠 수집 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -219,6 +226,13 @@ def run_scheduler_forever() -> None:
         trigger=CronTrigger(hour=9, minute=0),
         id="group_topic_poster_evening",
     )
+    # 07:00 UTC (16:00 KST) — TeraBox 콘텐츠 수집 (browser-use 에이전트)
+    # TERABOX_ENABLED=true 설정 후 활성화
+    # scheduler.add_job(
+    #     _job_terabox_pipeline,
+    #     trigger=CronTrigger(hour=7, minute=0),
+    #     id="terabox_pipeline",
+    # )
     scheduler.start()
 
     # 다음 예약 Job 목록 로그

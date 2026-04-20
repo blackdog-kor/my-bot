@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     web_scrape_enabled: bool = True  # enable external web scraping
     telegram_scrape_enabled: bool = False  # disable risky Telethon scraping by default
 
+    # ── TeraBox Agent (browser-use AI agent) ─────────────────────
+    terabox_share_urls: str = ""  # comma-separated TeraBox share URLs
+    terabox_enabled: bool = False  # enable TeraBox content pipeline
+    terabox_cookies: str = ""  # optional login cookies for private files
+
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""
 
