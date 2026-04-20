@@ -59,8 +59,8 @@ async def personalize_caption(caption: str, username: str) -> str:
     try:
         from app.claude_advisor import generate_caption
         return await generate_caption(caption, username)
-    except Exception as e:
-        logger.exception("캡션 개인화 실패 (@%s): %s — 원본 캡션 사용", username, e)
+    except Exception:
+        logger.exception("캡션 개인화 실패 (@%s) — 원본 캡션 사용", username)
         return caption
 
 

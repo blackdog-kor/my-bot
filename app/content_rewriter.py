@@ -209,14 +209,14 @@ async def _rewrite_with_gemini(
 async def _generate_with_claude(prompt: str, cta_text: str) -> str | None:
     """Claude Sonnet으로 오리지널 콘텐츠 생성."""
     try:
-        from app.claude_advisor import _call_sonnet
+        from app.claude_advisor import generate_original_content
 
-        result = await _call_sonnet(prompt, max_tokens=400, temperature=0.9)
+        result = await generate_original_content(
+            prompt, max_tokens=400, temperature=0.9, cta_text=cta_text,
+        )
         if result:
-            result = _apply_cta(result, cta_text)
             logger.info("Claude 콘텐츠 생성 완료 (%d chars)", len(result))
-            return result.strip()
-        return None
+        return result
     except Exception as e:
         logger.exception("Claude 생성 실패: %s", e)
         return None
