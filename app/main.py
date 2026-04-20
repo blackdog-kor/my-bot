@@ -606,3 +606,99 @@ async def debug_terabox_test(request: Request, url: str = ""):
         ],
         "terabox_enabled": settings.terabox_enabled,
     }
+
+
+@app.get("/debug/sports-test")
+async def debug_sports_test(request: Request, league_id: int = 0):
+    """스포츠 콘텐츠 파이프라인 수동 테스트 엔드포인트.
+
+    사용법:
+    - /debug/sports-test — 전체 리그 데이터 수집 + AI 콘텐츠 생성 테스트
+    - /debug/sports-test?league_id=39 — 특정 리그만 테스트 (39=EPL)
+    """
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from app.sports_scraper import (
+        LEAGUE_NAMES,
+        collect_sports_data,
+        collect_sports_data_web_fallback,
+    )
+
+    result: dict = {
+        "sports_enabled": settings.sports_enabled,
+        "sports_api_key_set": bool(settings.sports_api_key),
+        "configured_leagues": settings.sports_leagues,
+    }
+
+    # Check AI key availability
+    has_ai = bool(
+        settings.anthropic_api_key
+        or settings.openai_api_key
+        or settings.gemini_api_key
+    )
+    result["ai_key_available"] = has_ai
+
+    if not settings.sports_enabled:
+        result["status"] = "disabled"
+        result["message"] = "SPORTS_ENABLED=false — 스포츠 파이프라인 비활성화"
+        return result
+
+    try:
+        if settings.sports_api_key:
+            target = league_id if league_id else None
+            sports_data = await collect_sports_data(target)
+            result["mode"] = "api"
+            result["leagues_collected"] = len(sports_data)
+            result["data_summary"] = [
+                {
+                    "league": sd.league_name,
+                    "league_id": sd.league_id,
+                    "upcoming_matches": len(sd.upcoming),
+                    "recent_results": len(sd.recent_results),
+                    "standings_teams": len(sd.standings),
+                    "upcoming_sample": [
+                        f"{m.home_team} vs {m.away_team} ({m.match_date})"
+                        for m in sd.upcoming[:3]
+                    ],
+                    "results_sample": [
+                        f"{m.home_team} {m.home_score}-{m.away_score} {m.away_team}"
+                        for m in sd.recent_results[:3]
+                    ],
+                }
+                for sd in sports_data
+            ]
+
+            # Generate sample content if AI is available
+            if has_ai and sports_data:
+                from app.sports_content_generator import (
+                    generate_daily_sports_content,
+                )
+
+                posts = await generate_daily_sports_content(
+                    sports_data, max_posts=2, cta_text="👉 테스트 CTA",
+                )
+                result["generated_posts"] = [
+                    {"type": p["content_type"], "text": p["text"][:500]}
+                    for p in posts
+                ]
+        else:
+            web_data = await collect_sports_data_web_fallback()
+            result["mode"] = "web_fallback"
+            result["web_articles"] = len(web_data)
+            result["samples"] = [
+                {"source": d["source"], "text": d["text"][:200]}
+                for d in web_data[:5]
+            ]
+
+        result["status"] = "ok"
+        result["available_leagues"] = {
+            str(k): v for k, v in LEAGUE_NAMES.items()
+        }
+
+    except Exception as e:
+        logger.exception("sports-test 실패: %s", e)
+        result["status"] = "error"
+        result["error"] = str(e)
+
+    return result

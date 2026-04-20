@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     terabox_enabled: bool = False  # enable TeraBox content pipeline
     terabox_cookies: str = ""  # optional login cookies for private files
 
+    # ── Sports Content Automation ─────────────────────────────────
+    sports_enabled: bool = True  # enable sports content pipeline
+    sports_api_key: str = ""  # API-Football key (api-sports.io)
+    sports_leagues: str = "39,140,135,61,78"  # comma-separated league IDs (PL,LaLiga,SerieA,L1,BL)
+    sports_post_interval_hours: int = 6  # hours between sports posts
+    sports_max_daily_posts: int = 4  # max sports posts per day
+    sports_topic_content_type: str = "sports"  # content_type for forum topic routing
+
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""
 

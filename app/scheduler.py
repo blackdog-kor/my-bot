@@ -158,6 +158,13 @@ def _job_terabox_pipeline() -> None:
         _notify("📦 TeraBox 콘텐츠 수집 완료" if ok else "📦 TeraBox 콘텐츠 수집 실패")
 
 
+def _job_sports_pipeline() -> None:
+    with _job_lock:
+        _notify("⚽ 스포츠 콘텐츠 자동화 Job 시작 (경기일정→AI분석→게시)")
+        ok = _run_script("sports_pipeline.py", "스포츠자동화(sports_pipeline)")
+        _notify("⚽ 스포츠 콘텐츠 완료" if ok else "⚽ 스포츠 콘텐츠 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -233,6 +240,18 @@ def run_scheduler_forever() -> None:
     #     trigger=CronTrigger(hour=7, minute=0),
     #     id="terabox_pipeline",
     # )
+    # 04:00 UTC (13:00 KST) — 스포츠 콘텐츠 자동화 (경기일정 수집→AI분석→게시)
+    scheduler.add_job(
+        _job_sports_pipeline,
+        trigger=CronTrigger(hour=4, minute=0),
+        id="sports_pipeline_afternoon",
+    )
+    # 10:00 UTC (19:00 KST) — 스포츠 콘텐츠 2차 (저녁 피크, 경기 결과 위주)
+    scheduler.add_job(
+        _job_sports_pipeline,
+        trigger=CronTrigger(hour=10, minute=0),
+        id="sports_pipeline_evening",
+    )
     scheduler.start()
 
     # 다음 예약 Job 목록 로그
