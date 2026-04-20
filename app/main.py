@@ -32,18 +32,6 @@ def _check_debug_auth(request: Request) -> bool:
     return secrets.compare_digest(provided, _DEBUG_SECRET)
 
 
-def _run_bot():
-    try:
-        from bot.main import main as bot_main
-        logger.info("Admin Bot thread started")
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(bot_main())
-    except Exception as e:
-        logger.warning("Bot thread exited: %s", e)
-
-
 def _run_subscribe_bot():
     try:
         from bot.subscribe_bot import run_bot as subscribe_run_bot
@@ -111,13 +99,6 @@ async def lifespan(app: FastAPI):
         register_1win()
     except Exception as e:
         logger.warning("token_vault init: %s", e)
-
-    # Admin Bot 스레드 시작
-    try:
-        bot_thread = threading.Thread(target=_run_bot, daemon=True)
-        bot_thread.start()
-    except Exception as e:
-        logger.warning("Bot thread start failed: %s", e)
 
     # Subscribe Bot 스레드 시작 (SUBSCRIBE_BOT_TOKEN이 설정된 경우에만)
     if settings.subscribe_bot_token:
