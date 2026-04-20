@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-04-20 | TeraBox 디버그 엔드포인트 + channel_content 테이블 초기화
+
+### 💡 결정 사항
+- `/debug/terabox-test` 엔드포인트 추가 — 단일 URL 및 전체 수집 두 가지 모드 지원
+- `channel_content` 테이블 초기화를 FastAPI lifespan에 추가 (TeraBox 파이프라인 선행 조건)
+- 디버그 인증 (`X-Debug-Secret`) 일관 적용
+
+### 🔧 변경 파일 목록
+- `app/main.py` — `/debug/terabox-test` 엔드포인트 추가, lifespan에 channel_content 테이블 초기화
+- `DEVLOG.md` — 세션 기록
+- `TODO.md` — `/debug/terabox-test` 완료 체크
+
+### 📋 다음 할 일
+- Railway에 `TERABOX_SHARE_URLS` 환경변수 설정
+- Railway 배포 후 `/debug/terabox-test` 엔드포인트 호출하여 browser-use headless 작동 확인
+- 정상 작동 확인 후 `scheduler.py`에서 `terabox_pipeline` Job 주석 해제
+- TeraBox 다운로드 → BytesIO → 채널 직접 비디오 업로드 연동 (file_id 캐싱)
+
+---
+
 ## 2026-04-20 | TeraBox 콘텐츠 에이전트 모듈 구축
 
 ### 💡 결정 사항
