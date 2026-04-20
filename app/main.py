@@ -93,6 +93,12 @@ async def lifespan(app: FastAPI):
         logger.warning("ensure_discovered_groups_table: %s", e)
 
     try:
+        from app.group_topic_manager import ensure_forum_topics_table
+        ensure_forum_topics_table()
+    except Exception as e:
+        logger.warning("ensure_forum_topics_table: %s", e)
+
+    try:
         from app.affiliate_tracker import ensure_affiliate_stats_table
         ensure_affiliate_stats_table()
     except Exception as e:

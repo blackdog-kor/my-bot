@@ -23,8 +23,9 @@ class Settings(BaseSettings):
     # ── Admin ────────────────────────────────────────────────────
     admin_id: int = 0
 
-    # ── Channel / URLs ───────────────────────────────────────────
+    # ── Channel / Group / URLs ───────────────────────────────────
     channel_id: str = ""
+    group_id: str = ""  # Forum-enabled group for topic-based content
     affiliate_url: str = ""
     vip_url: str = "https://1wwtgq.com/?p=mskf"
     tracking_server_url: str = ""

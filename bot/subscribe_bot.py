@@ -55,6 +55,10 @@ CB_CONFIG          = "sub_config"
 CB_CONFIG_URL      = "sub_cfg_url"
 CB_CONFIG_VIEW     = "sub_cfg_view"
 CB_CONFIG_BTN_TEXT = "sub_cfg_btn_text"
+# 토픽 관리
+CB_TOPICS_LIST     = "sub_topics_list"
+CB_TOPICS_CREATE   = "sub_topics_create"
+CB_TOPICS_POST     = "sub_topics_post"
 
 # context.user_data 키: 텍스트 입력 대기 중인 필드명
 _AWAITING_KEY = "sub_awaiting"
@@ -79,6 +83,7 @@ def _admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🗑 게시물 삭제",     callback_data=CB_POST_DELETE)],
         [InlineKeyboardButton("📤 즉시 전체 발송", callback_data=CB_SEND)],
         [InlineKeyboardButton("📊 구독자 현황",    callback_data=CB_STATUS)],
+        [InlineKeyboardButton("📌 그룹 토픽 관리", callback_data=CB_TOPICS_LIST)],
         [InlineKeyboardButton("⚙️ 캠페인 설정",   callback_data=CB_CONFIG)],
     ])
 
@@ -529,6 +534,94 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             parse_mode="HTML",
         )
         return
+
+    # ── 그룹 토픽 관리 ────────────────────────────────────────────────────
+    if data == CB_TOPICS_LIST:
+        if not admin:
+            return
+        try:
+            from app.group_topic_manager import list_topics
+            topics = list_topics()
+        except Exception as e:
+            await query.message.reply_text(f"❌ 토픽 조회 실패: {e}", reply_markup=_home_keyboard())
+            return
+        if not topics:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🆕 토픽 자동 생성", callback_data=CB_TOPICS_CREATE)],
+                [InlineKeyboardButton("🏠 메인 메뉴", callback_data=CB_HOME)],
+            ])
+            await query.message.reply_text(
+                "📌 등록된 토픽이 없습니다.\n\nGROUP_ID 설정 후 '토픽 자동 생성'을 눌러주세요.",
+                reply_markup=keyboard,
+            )
+            return
+        lines = ["📌 <b>그룹 토픽 목록</b>\n"]
+        for t in topics:
+            status = "✅" if t["is_active"] else "⏸"
+            auto = "🔄" if t.get("auto_post") else "⏹"
+            lines.append(
+                f"{status}{auto} <b>{t['name']}</b>\n"
+                f"   └ type: {t['content_type']} | thread_id: {t['thread_id']}"
+            )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🆕 토픽 추가 생성", callback_data=CB_TOPICS_CREATE)],
+            [InlineKeyboardButton("📤 토픽에 즉시 게시", callback_data=CB_TOPICS_POST)],
+            [InlineKeyboardButton("🏠 메인 메뉴", callback_data=CB_HOME)],
+        ])
+        await query.message.reply_text(
+            "\n".join(lines), reply_markup=keyboard, parse_mode="HTML",
+        )
+        return
+
+    if data == CB_TOPICS_CREATE:
+        if not admin:
+            return
+        await query.message.reply_text("🔄 토픽 생성 중... 잠시 기다려주세요.")
+        asyncio.create_task(_do_create_topics(context.bot, query.from_user.id))
+        return
+
+    if data == CB_TOPICS_POST:
+        if not admin:
+            return
+        await query.message.reply_text("📤 토픽에 게시 중...", reply_markup=_home_keyboard())
+        asyncio.create_task(_do_post_to_topic(context.bot, query.from_user.id))
+        return
+
+
+# ── 토픽 관리 비동기 작업 ─────────────────────────────────────────────────────
+
+async def _do_create_topics(bot, admin_chat_id: int) -> None:
+    """포럼 토픽 일괄 생성 (백그라운드 실행)."""
+    try:
+        from app.group_topic_manager import create_forum_topics, ensure_forum_topics_table
+        ensure_forum_topics_table()
+        created = await create_forum_topics()
+    except Exception as e:
+        await bot.send_message(admin_chat_id, f"❌ 토픽 생성 실패: {e}")
+        return
+
+    if created:
+        lines = [f"✅ 토픽 {len(created)}개 생성 완료!\n"]
+        for t in created:
+            lines.append(f"  • {t['name']} (thread_id={t['thread_id']})")
+        await bot.send_message(admin_chat_id, "\n".join(lines))
+    else:
+        await bot.send_message(admin_chat_id, "ℹ️ 추가 생성할 토픽이 없습니다 (모두 존재).")
+
+
+async def _do_post_to_topic(bot, admin_chat_id: int) -> None:
+    """다음 게시물을 분류하여 적절한 토픽에 즉시 게시."""
+    try:
+        from app.group_topic_manager import auto_post_campaign_to_topics
+        posted = await auto_post_campaign_to_topics()
+    except Exception as e:
+        await bot.send_message(admin_chat_id, f"❌ 토픽 게시 실패: {e}")
+        return
+
+    if posted > 0:
+        await bot.send_message(admin_chat_id, f"✅ 토픽에 {posted}건 게시 완료!")
+    else:
+        await bot.send_message(admin_chat_id, "ℹ️ 게시할 콘텐츠가 없습니다.")
 
 
 # ── 즉시 발송 (관리자 버튼) ───────────────────────────────────────────────────
