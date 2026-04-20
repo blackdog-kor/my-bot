@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-04-20 | 스포츠 경기 일정/분석 콘텐츠 자동화 파이프라인 구축
+
+### 💡 결정 사항
+- 콘텐츠 토픽으로 **스포츠 경기 일정/분석** 선정 — 카지노/베팅 채널과 자연스러운 시너지
+- API-Football (api-sports.io) 무료 티어(100req/day) 활용 — 실시간 경기 데이터 수집
+- AI 3단 폴백: Claude Sonnet → OpenAI GPT-4o-mini → Gemini Flash
+- 템플릿 폴백도 구현 — AI 키 미설정 시에도 기본 게시물 생성 가능
+- 포럼 그룹에 "⚽ 스포츠 분석" 토픽 추가 — 스포츠 콘텐츠 전용 공간
+- 스케줄: 04:00 UTC (13:00 KST, 오후) + 10:00 UTC (19:00 KST, 저녁)
+- browser-use는 requirements.txt에 이미 설치됨 (v0.12.6) — Railway에서 headless 작동
+
+### 🔧 변경 파일 목록
+- `app/sports_scraper.py` (신규) — API-Football 연동 + 웹 스크래핑 폴백
+- `app/sports_content_generator.py` (신규) — AI 기반 경기 프리뷰/리뷰/순위 게시물 생성
+- `scripts/sports_pipeline.py` (신규) — 스케줄러용 파이프라인 오케스트레이션
+- `app/config.py` — `sports_enabled`, `sports_api_key`, `sports_leagues` 등 추가
+- `app/group_topic_manager.py` — "⚽ 스포츠 분석" 토픽 추가, classify_content에 스포츠 키워드 추가
+- `app/scheduler.py` — `_job_sports_pipeline` Job 추가 (04:00 + 10:00 UTC)
+- `app/main.py` — `/debug/sports-test` 엔드포인트 추가
+
+### 📋 다음 할 일
+- Railway에 `SPORTS_API_KEY` 환경변수 설정 (api-sports.io 무료 가입)
+- `/debug/sports-test` 엔드포인트로 파이프라인 테스트
+- `GROUP_ID` 설정 후 포럼 토픽 자동 생성 확인
+- browser-use Railway headless 작동 확인 (`/debug/terabox-test`로 겸용 테스트 가능)
+
+### ⚠️ 주의사항
+- API-Football 무료 티어: 100 requests/day — 리그 수 x 3 (일정+결과+순위) = ~15 req/run
+- `SPORTS_API_KEY` 미설정 시 ESPN/BBC 웹 스크래핑 폴백 사용 (정확도 낮음)
+- AI 키 미설정 시 템플릿 기반 게시물 생성 (리라이팅 없음)
+
+---
+
 ## 2026-04-20 | TeraBox 디버그 엔드포인트 + channel_content 테이블 초기화
 
 ### 💡 결정 사항

@@ -231,8 +231,8 @@ async def main() -> None:
                 json={"chat_id": admin_id, "text": text[:4000]},
                 timeout=10,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Admin notify failed: %s", e)
 
     try:
         saved = await run_sports_collect_and_generate()
