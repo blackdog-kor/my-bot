@@ -144,6 +144,13 @@ def _job_content_pipeline() -> None:
         _notify("📺 콘텐츠 자동화 Job 완료" if ok else "📺 콘텐츠 자동화 Job 실패")
 
 
+def _job_group_topic_poster() -> None:
+    with _job_lock:
+        _notify("📌 그룹 토픽 자동 게시 Job 시작")
+        ok = _run_script("group_topic_poster.py", "그룹토픽게시(group_topic_poster)")
+        _notify("📌 그룹 토픽 게시 완료" if ok else "📌 그룹 토픽 게시 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -199,6 +206,18 @@ def run_scheduler_forever() -> None:
         _job_content_pipeline,
         trigger=CronTrigger(hour=11, minute=0),
         id="content_pipeline_evening",
+    )
+    # 02:00 UTC (11:00 KST) — 그룹 토픽 자동 게시 (오전 피크)
+    scheduler.add_job(
+        _job_group_topic_poster,
+        trigger=CronTrigger(hour=2, minute=0),
+        id="group_topic_poster_morning",
+    )
+    # 09:00 UTC (18:00 KST) — 그룹 토픽 자동 게시 (저녁 피크)
+    scheduler.add_job(
+        _job_group_topic_poster,
+        trigger=CronTrigger(hour=9, minute=0),
+        id="group_topic_poster_evening",
     )
     scheduler.start()
 

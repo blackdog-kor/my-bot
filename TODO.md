@@ -18,19 +18,26 @@
 - [x] `pydantic-settings` 실적용 — userbot_sender, main에서 os.getenv → settings 교체
 - [x] `tenacity` 실적용 — `_download_via_bot_api`에 재시도 데코레이터 적용
 - [x] PostgreSQL MCP 추가 (`.mcp.json`에 `@anthropic/mcp-server-postgres`)
+- [x] `requirements.txt`에 `anthropic>=0.40.0` 추가
+- [x] 채널 콘텐츠 자동화 코드 구현 (`content_scraper`, `content_rewriter`, `channel_poster`, `web_content_scraper`)
+- [x] 콘텐츠 파이프라인 스크립트 (`scripts/content_pipeline.py`)
+- [x] 스케줄러에 콘텐츠 자동화 Job 등록 (05:00 UTC + 11:00 UTC)
+- [x] `app/config.py` 콘텐츠 자동화 설정 추가
+- [x] `channel_content` 테이블 CRUD (`pg_broadcast.py`)
 
 ---
 
 ## 🔴 즉시 (이번 주)
 
 - [ ] `ANTHROPIC_API_KEY` → Codespace Secrets 등록
-- [ ] `requirements.txt`에 `anthropic>=0.40.0` 추가
 - [ ] `app/claude_advisor.py` 기본 구현 (Sonnet + Opus Advisor 패턴)
 - [ ] Gemini 캡션 → Claude Sonnet 교체 (`app/userbot_sender.py`)
 - [ ] `.playwright-mcp/` 정리 (gitignore 또는 커밋 결정)
-- [ ] 콘텐츠 소스 채널 목록 확정 (`CONTENT_SCRAPE_SOURCES` 환경변수)
-- [ ] 콘텐츠 자동화 파이프라인 테스트 (`/debug/content-test` 추가)
-- [ ] `CHANNEL_ID` 환경변수 설정 (게시 대상 채널)
+- [ ] **`CHANNEL_ID` 환경변수 설정** (게시 대상 채널 — 콘텐츠 시스템 가동 필수)
+- [ ] **`OPENAI_API_KEY` 또는 `GEMINI_API_KEY` Railway 환경변수 확인** (리라이팅용)
+- [ ] **`/debug/content-test` 엔드포인트 추가** (수동 파이프라인 테스트)
+- [ ] **콘텐츠 파이프라인 수동 실행 테스트** (Railway 배포 후 확인)
+- [ ] 콘텐츠 소스 채널 목록 확정 (`CONTENT_SCRAPE_SOURCES` 환경변수 — 선택사항)
 
 ---
 
