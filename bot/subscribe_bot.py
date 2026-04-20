@@ -577,14 +577,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not admin:
             return
         await query.message.reply_text("🔄 토픽 생성 중... 잠시 기다려주세요.")
-        asyncio.create_task(_do_create_topics(context.bot, query.from_user.id))
+        task = asyncio.create_task(_do_create_topics(context.bot, query.from_user.id))
+        task.add_done_callback(lambda t: logger.exception("topic create error", exc_info=t.exception()) if t.exception() else None)
         return
 
     if data == CB_TOPICS_POST:
         if not admin:
             return
         await query.message.reply_text("📤 토픽에 게시 중...", reply_markup=_home_keyboard())
-        asyncio.create_task(_do_post_to_topic(context.bot, query.from_user.id))
+        task = asyncio.create_task(_do_post_to_topic(context.bot, query.from_user.id))
+        task.add_done_callback(lambda t: logger.exception("topic post error", exc_info=t.exception()) if t.exception() else None)
         return
 
 

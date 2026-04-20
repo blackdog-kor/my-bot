@@ -22,7 +22,7 @@ def ensure_forum_topics_table() -> None:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS forum_topics (
                     id              SERIAL PRIMARY KEY,
-                    thread_id       INTEGER NOT NULL,
+                    thread_id       INTEGER NOT NULL UNIQUE,
                     name            TEXT NOT NULL,
                     content_type    TEXT NOT NULL,
                     icon_color      INTEGER DEFAULT 0,
@@ -53,7 +53,7 @@ def save_topic(
             cur.execute("""
                 INSERT INTO forum_topics (thread_id, name, content_type, icon_color, description)
                 VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (thread_id) DO NOTHING
                 RETURNING id
             """, (thread_id, name, content_type, icon_color, description))
             row = cur.fetchone()

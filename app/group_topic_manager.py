@@ -145,13 +145,8 @@ async def create_forum_topics(
 # ── 콘텐츠 라우팅 (토픽별 자동 게시) ────────────────────────────────────────────
 
 
-def classify_content(caption: str, file_type: str) -> str:
-    """콘텐츠를 content_type으로 분류.
-
-    규칙 기반 분류:
-    - 키워드 매칭으로 적절한 토픽에 라우팅
-    - 매칭 실패 시 'promotion' (기본 토픽)
-    """
+def classify_content(caption: str, file_type: str = "") -> str:
+    """콘텐츠를 content_type으로 분류 (키워드 기반, file_type은 향후 확장용)."""
     text = (caption or "").lower()
 
     # 공지사항 키워드
@@ -232,7 +227,8 @@ async def post_to_topic(
                     reply_markup=keyboard,
                     parse_mode="HTML",
                 )
-            except Exception:
+            except Exception as vid_err:
+                logger.warning("send_video failed, fallback to document: %s", vid_err)
                 await bot.send_document(
                     chat_id=int(gid),
                     document=file_id,
