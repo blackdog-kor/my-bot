@@ -49,34 +49,18 @@ GEMINI_API_KEY      = settings.gemini_api_key
 
 
 async def personalize_caption(caption: str, username: str) -> str:
-    """Gemini 1.5 Flash로 username 기반 언어 감지 후 캡션 재작성. 실패 시 원본 반환."""
-    if not GEMINI_API_KEY or not caption or not username:
+    """Claude Sonnet으로 캡션 개인화. 실패 시 Gemini 폴백, 최종 실패 시 원본 반환.
+
+    Claude Advisor 모듈(app/claude_advisor.py)에 위임하여
+    ANTHROPIC_API_KEY → GEMINI_API_KEY 순으로 시도한다.
+    """
+    if not caption or not username:
         return caption
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = (
-            f"You are a casino marketing expert.\n"
-            f"Detect the likely language/region from the Telegram username \"@{username}\" "
-            f"(common Indonesian names/words → Bahasa Indonesia, "
-            f"Korean name patterns or hangul characters → Korean, "
-            f"otherwise English).\n"
-            f"Rewrite the following promotional caption in that detected language.\n"
-            f"Rules:\n"
-            f"- Keep ALL URLs exactly as-is (do not translate or modify URLs)\n"
-            f"- Keep ALL emojis in place\n"
-            f"- Preserve line breaks and overall structure\n"
-            f"- Only translate the natural language text portions\n"
-            f"Respond with ONLY the rewritten caption, nothing else.\n\n"
-            f"Caption:\n{caption}"
-        )
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, model.generate_content, prompt)
-        result = (response.text or "").strip()
-        return result if result else caption
+        from app.claude_advisor import generate_caption
+        return await generate_caption(caption, username)
     except Exception as e:
-        logger.warning("Gemini 개인화 실패 (@%s): %s — 원본 캡션 사용", username, e)
+        logger.exception("캡션 개인화 실패 (@%s): %s — 원본 캡션 사용", username, e)
         return caption
 
 

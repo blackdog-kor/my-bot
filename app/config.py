@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     tracking_server_url: str = ""
 
     # ── External API keys ────────────────────────────────────────
+    anthropic_api_key: str = ""
     gemini_api_key: str = ""
     brightdata_api_token: str = ""
 

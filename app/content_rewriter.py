@@ -82,9 +82,16 @@ async def rewrite_content(
     if not original_text.strip():
         return None
 
-    # AI 선택: OpenAI 우선, Gemini 폴백
+    # AI 선택: Claude 우선, OpenAI 폴백, Gemini 최종 폴백
+    anthropic_key = settings.anthropic_api_key
     openai_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
     gemini_key = settings.gemini_api_key
+
+    if anthropic_key:
+        result = await _rewrite_with_claude(original_text, media_type, cta_text)
+        if result:
+            return result
+        logger.info("Claude 리라이팅 실패 — OpenAI 폴백 시도")
 
     if openai_key:
         return await _rewrite_with_openai(original_text, media_type, cta_text, openai_key)
@@ -107,8 +114,15 @@ async def generate_original_content(topic: str, cta_text: str = "") -> str | Non
     """
     openai_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
     gemini_key = settings.gemini_api_key
+    anthropic_key = settings.anthropic_api_key
 
     prompt = CAPTION_GENERATION_PROMPT.format(topic=topic)
+
+    # Claude 우선 → OpenAI 폴백 → Gemini 최종 폴백
+    if anthropic_key:
+        result = await _generate_with_claude(prompt, cta_text)
+        if result:
+            return result
 
     if openai_key:
         return await _generate_with_openai(prompt, cta_text, openai_key)
@@ -116,6 +130,22 @@ async def generate_original_content(topic: str, cta_text: str = "") -> str | Non
         return await _generate_with_gemini(prompt, cta_text, gemini_key)
     else:
         logger.warning("AI API 키 없음 — 콘텐츠 생성 불가")
+        return None
+
+
+async def _rewrite_with_claude(
+    text: str, media_type: str, cta_text: str,
+) -> str | None:
+    """Claude Sonnet으로 리라이팅 (claude_advisor 모듈 위임)."""
+    try:
+        from app.claude_advisor import rewrite_content as claude_rewrite
+
+        result = await claude_rewrite(text, media_type, cta_text)
+        if result:
+            logger.info("Claude 리라이팅 완료 (%d chars)", len(result))
+        return result
+    except Exception as e:
+        logger.exception("Claude 리라이팅 실패: %s", e)
         return None
 
 
@@ -173,6 +203,22 @@ async def _rewrite_with_gemini(
 
     except Exception as e:
         logger.exception("Gemini 리라이팅 실패: %s", e)
+        return None
+
+
+async def _generate_with_claude(prompt: str, cta_text: str) -> str | None:
+    """Claude Sonnet으로 오리지널 콘텐츠 생성."""
+    try:
+        from app.claude_advisor import _call_sonnet
+
+        result = await _call_sonnet(prompt, max_tokens=400, temperature=0.9)
+        if result:
+            result = _apply_cta(result, cta_text)
+            logger.info("Claude 콘텐츠 생성 완료 (%d chars)", len(result))
+            return result.strip()
+        return None
+    except Exception as e:
+        logger.exception("Claude 생성 실패: %s", e)
         return None
 
 

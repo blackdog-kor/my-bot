@@ -1,6 +1,6 @@
 # ROADMAP — 자동화 파이프라인 개발 로드맵
 
-마지막 갱신: 2026-04-19
+마지막 갱신: 2026-04-20
 
 ---
 
@@ -19,9 +19,9 @@
 |------|------|------|
 | Autopus-ADK 설치 | ✅ 완료 | `.claude/`, `.codex/`, `.agents/` 구성 |
 | GPT-4o 코드 리뷰 Hook | ✅ 완료 | Write/Edit PostToolUse 자동 리뷰 |
-| Anthropic SDK 설치 | ⬜ 미완 | `pip install anthropic` + requirements.txt |
-| ANTHROPIC_API_KEY 설정 | ⬜ 미완 | Codespace Secrets 등록 필요 |
-| Claude Advisor 구현 | ⬜ 미완 | 토큰 비용 자동 조절 핵심 기능 |
+| Anthropic SDK 설치 | ✅ 완료 | `requirements.txt`에 `anthropic>=0.40.0` |
+| ANTHROPIC_API_KEY 설정 | ✅ 완료 | Railway 환경변수 등록 |
+| Claude Advisor 구현 | ✅ 완료 | `app/claude_advisor.py` Sonnet+Opus 패턴 |
 | OPENAI_API_KEY 검증 | ✅ 완료 | 환경변수 설정됨 |
 | `.playwright-mcp/` 정리 | ⬜ 대기 | gitignore 또는 커밋 결정 필요 |
 

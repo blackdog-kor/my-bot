@@ -29,9 +29,9 @@
 
 ## 🔴 즉시 (이번 주)
 
-- [ ] `ANTHROPIC_API_KEY` → Codespace Secrets 등록
-- [ ] `app/claude_advisor.py` 기본 구현 (Sonnet + Opus Advisor 패턴)
-- [ ] Gemini 캡션 → Claude Sonnet 교체 (`app/userbot_sender.py`)
+- [x] `ANTHROPIC_API_KEY` → Codespace Secrets 등록
+- [x] `app/claude_advisor.py` 기본 구현 (Sonnet + Opus Advisor 패턴)
+- [x] Gemini 캡션 → Claude Sonnet 교체 (`app/userbot_sender.py`)
 - [ ] `.playwright-mcp/` 정리 (gitignore 또는 커밋 결정)
 - [ ] **`CHANNEL_ID` 환경변수 설정** (게시 대상 채널 — 콘텐츠 시스템 가동 필수)
 - [ ] **`OPENAI_API_KEY` 또는 `GEMINI_API_KEY` Railway 환경변수 확인** (리라이팅용)

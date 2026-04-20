@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-04-20 | Claude Advisor 패턴 구현 완료
+
+### 💡 결정 사항
+- ANTHROPIC_API_KEY Railway 등록 완료 → Claude Advisor 패턴 본격 구현
+- Sonnet (Executor) + Opus (Advisor) 2단 구조 확정
+- 캡션 개인화: Claude Sonnet 우선 → Gemini Flash 폴백 (기존 Gemini 전용에서 전환)
+- 콘텐츠 리라이팅: Claude → OpenAI → Gemini 3단 폴백 체인 구축
+- 전략 평가: Opus 우선 → Sonnet 폴백 (고급 분석에만 Opus 사용)
+- 모델명: claude-sonnet-4-5-20250514 (Executor), claude-opus-4-0-20250514 (Advisor)
+
+### 🔧 변경 파일 목록
+- `app/config.py` — `anthropic_api_key` 필드 추가
+- `app/claude_advisor.py` (신규) — 핵심 Claude Advisor 모듈
+  - `generate_caption()` — DM 캡션 개인화 (Sonnet + Gemini 폴백)
+  - `rewrite_content()` — 채널 콘텐츠 리라이팅
+  - `evaluate_strategy()` — 캠페인 전략 평가 (Opus + Sonnet 폴백)
+- `app/userbot_sender.py` — Gemini 직접 호출 → `claude_advisor.generate_caption()` 위임
+- `app/content_rewriter.py` — Claude를 최우선 AI로 추가 (3단 폴백 체인)
+- `AI_STACK.md` — Claude 상태 ✅ 활성으로 갱신
+- `TODO.md` — 완료 항목 체크
+- `DEVLOG.md` — 세션 기록
+
+### 📋 다음 할 일
+- `/debug/session-test` → `/debug/dm-test` 로 실 발송 테스트
+- Claude API 비용 모니터링 대시보드 확인
+- 콘텐츠 파이프라인 Claude 리라이팅 실전 테스트
+- DM 발송 스케줄 활성화 준비 (warmup 완료 후)
+
+### ⚠️ 주의사항
+- Claude API 키 미설정 시 자동으로 Gemini 폴백 — 서비스 중단 없음
+- Opus는 전략 평가(`evaluate_strategy`)에서만 사용 — 비용 절감
+- content_rewriter.py의 `_generate_with_claude`는 `_call_sonnet`을 직접 import — 순환참조 주의
+
+---
+
 ## 2026-04-19 | 채널 콘텐츠 자동화 시스템 구축
 
 ### 💡 결정 사항
