@@ -42,7 +42,7 @@
 - [ ] **콘텐츠 파이프라인 수동 실행 테스트** (Railway 배포 후 확인)
 - [ ] 콘텐츠 소스 채널 목록 확정 (`CONTENT_SCRAPE_SOURCES` 환경변수 — 선택사항)
 - [ ] **`TERABOX_SHARE_URLS` 환경변수 설정** (TeraBox 공유 링크 목록)
-- [ ] **`/debug/terabox-test` 엔드포인트 추가** (TeraBox 에이전트 수동 테스트)
+- [x] **`/debug/terabox-test` 엔드포인트 추가** (TeraBox 에이전트 수동 테스트)
 
 ---
 

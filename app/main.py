@@ -93,6 +93,12 @@ async def lifespan(app: FastAPI):
         logger.warning("ensure_affiliate_stats_table: %s", e)
 
     try:
+        from app.pg_broadcast import ensure_channel_content_table
+        ensure_channel_content_table()
+    except Exception as e:
+        logger.warning("ensure_channel_content_table: %s", e)
+
+    try:
         from app.token_vault import ensure_vault_table
         from app.api_discovery import register_1win
         ensure_vault_table()
@@ -526,4 +532,77 @@ async def debug_status(request: Request):
         "db_status": db_status,
         "python": sys.executable,
         "affiliate_url": AFFILIATE_URL[:30] + "..." if len(AFFILIATE_URL) > 30 else AFFILIATE_URL,
+    }
+
+
+@app.get("/debug/terabox-test")
+async def debug_terabox_test(request: Request, url: str = ""):
+    """TeraBox 에이전트 수동 테스트 엔드포인트.
+
+    사용법:
+    - /debug/terabox-test — 설정된 TERABOX_SHARE_URLS 전체 수집 테스트
+    - /debug/terabox-test?url=https://terabox.com/s/xxx — 단일 URL 테스트
+    """
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from app.terabox_agent import (
+        extract_terabox_info,
+        get_share_urls,
+        is_terabox_url,
+    )
+
+    # 단일 URL 테스트 모드
+    if url:
+        if not is_terabox_url(url):
+            return {"status": "error", "error": "유효한 TeraBox URL이 아닙니다.", "url": url}
+
+        item = await extract_terabox_info(url)
+        if item:
+            return {
+                "status": "ok",
+                "mode": "single_url",
+                "item": {
+                    "share_url": item.share_url,
+                    "title": item.title,
+                    "file_name": item.file_name,
+                    "file_size": item.file_size,
+                    "media_type": item.media_type,
+                    "download_url": item.download_url,
+                    "thumbnail_url": item.thumbnail_url,
+                },
+            }
+        return {"status": "fail", "mode": "single_url", "error": "메타데이터 추출 실패", "url": url}
+
+    # 전체 URL 수집 테스트 모드
+    configured_urls = get_share_urls()
+    if not configured_urls:
+        return {
+            "status": "no_urls",
+            "error": "TERABOX_SHARE_URLS 환경변수가 미설정이거나 유효한 URL이 없습니다.",
+            "terabox_enabled": settings.terabox_enabled,
+        }
+
+    from app.terabox_agent import collect_terabox_content
+
+    result = await collect_terabox_content()
+    return {
+        "status": "ok" if result.success_count > 0 else "fail",
+        "mode": "full_collect",
+        "total_processed": result.total_processed,
+        "success_count": result.success_count,
+        "errors": result.errors,
+        "items": [
+            {
+                "share_url": item.share_url,
+                "title": item.title,
+                "file_name": item.file_name,
+                "file_size": item.file_size,
+                "media_type": item.media_type,
+                "download_url": item.download_url,
+                "thumbnail_url": item.thumbnail_url,
+            }
+            for item in result.items
+        ],
+        "terabox_enabled": settings.terabox_enabled,
     }
