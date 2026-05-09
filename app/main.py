@@ -702,3 +702,107 @@ async def debug_sports_test(request: Request, league_id: int = 0):
         result["error"] = str(e)
 
     return result
+
+
+@app.get("/debug/content-test")
+async def debug_content_test(request: Request, dry_run: bool = True):
+    """콘텐츠 자동화 파이프라인 수동 테스트.
+
+    - /debug/content-test          — 스크래핑+리라이팅만 (채널 미게시)
+    - /debug/content-test?dry_run=false — 스크래핑+리라이팅+채널 실제 게시
+    """
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from app.config import settings
+    from app.pg_broadcast import count_today_posted_content, ensure_channel_content_table
+
+    result: dict = {
+        "dry_run": dry_run,
+        "web_scrape_enabled": settings.web_scrape_enabled,
+        "content_rewrite_enabled": settings.content_rewrite_enabled,
+        "channel_id": settings.channel_id or "(미설정)",
+        "today_posted": 0,
+        "max_daily": settings.content_max_daily_posts,
+        "ai_keys": {
+            "anthropic": bool(settings.anthropic_api_key),
+            "openai": bool(settings.openai_api_key),
+            "gemini": bool(settings.gemini_api_key),
+        },
+    }
+
+    try:
+        ensure_channel_content_table()
+        result["today_posted"] = count_today_posted_content()
+    except Exception as e:
+        result["db_error"] = str(e)
+        return result
+
+    # Web scraping test
+    try:
+        from app.web_content_scraper import scrape_web_sources
+        web_items = await scrape_web_sources()
+        result["web_scraped"] = len(web_items)
+        result["web_samples"] = [
+            {"source": i["source_channel"], "text": i["text"][:150]}
+            for i in web_items[:3]
+        ]
+    except Exception as e:
+        result["web_scrape_error"] = str(e)
+        web_items = []
+
+    if not web_items:
+        result["status"] = "no_content"
+        return result
+
+    # Rewriting test (first item only)
+    if settings.content_rewrite_enabled and web_items:
+        try:
+            from app.content_rewriter import rewrite_content
+            sample = web_items[0]
+            rewritten = await rewrite_content(sample["text"], sample.get("media_type", "text"))
+            result["rewrite_sample"] = {
+                "original": sample["text"][:200],
+                "rewritten": rewritten[:300] if rewritten else None,
+                "ai_used": "ok" if rewritten else "fallback",
+            }
+        except Exception as e:
+            result["rewrite_error"] = str(e)
+
+    if not dry_run:
+        try:
+            from app.channel_poster import check_and_post
+            from app.pg_broadcast import is_content_duplicate, save_channel_content
+            from app.content_rewriter import rewrite_content as rw
+
+            saved = 0
+            for item in web_items[:3]:
+                src = item.get("source_channel", "unknown")
+                msg_id = item.get("message_id", 0)
+                if is_content_duplicate(src, msg_id):
+                    continue
+                text = item.get("text", "").strip()
+                if not text:
+                    continue
+                rewritten = await rw(text, item.get("media_type", "text")) if settings.content_rewrite_enabled else None
+                cid = save_channel_content(
+                    original_text=text,
+                    rewritten_text=rewritten,
+                    media_type=item.get("media_type", "text"),
+                    source_channel=src,
+                    source_msg_id=msg_id,
+                    source_views=item.get("views", 0),
+                )
+                if cid:
+                    saved += 1
+            posted = await check_and_post()
+            result["saved"] = saved
+            result["posted"] = posted
+            result["status"] = "ok"
+        except Exception as e:
+            result["pipeline_error"] = str(e)
+            logger.exception("content-test pipeline 실패: %s", e)
+    else:
+        result["status"] = "dry_run_ok"
+
+    return result
