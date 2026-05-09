@@ -11,8 +11,8 @@ from app.logging_config import get_logger
 
 logger = get_logger("claude_advisor")
 
-SONNET_MODEL = "claude-sonnet-4-5-20250514"
-OPUS_MODEL = "claude-opus-4-0-20250514"
+SONNET_MODEL = "claude-sonnet-4-6"
+OPUS_MODEL = "claude-opus-4-6"
 
 CAPTION_PERSONALIZE_PROMPT = """You are a casino marketing expert.
 Detect the likely language/region from the Telegram username "@{username}" \
