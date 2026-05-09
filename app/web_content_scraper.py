@@ -45,50 +45,14 @@ class WebArticle:
 
 WEB_SOURCES: list[dict[str, Any]] = [
     {
+        # Confirmed working: 49 articles, div.blog-post-item structure
         "name": "casino_org",
         "url": "https://www.casino.org/news/",
         "type": "news",
-        # Broad selectors targeting WordPress article structure
         "selectors": {
-            "articles": "article, .card, .post",
-            "title": "h2, h3, .card-title, .entry-title",
-            "text": ".entry-summary, .card-text, .excerpt, .post-excerpt, p",
-            "link": "a[href]",
-            "image": "img",
-        },
-    },
-    {
-        "name": "bigwinboard",
-        "url": "https://bigwinboard.com/",
-        "type": "bigwin",
-        "selectors": {
-            "articles": "article, .win-card, .post-card, .card",
-            "title": "h2, h3, .card-title",
-            "text": ".card-text, .excerpt, p",
-            "link": "a[href]",
-            "image": "img",
-        },
-    },
-    {
-        "name": "calvinayre",
-        "url": "https://calvinayre.com/",
-        "type": "news",
-        "selectors": {
-            "articles": "article, .post, .story",
-            "title": "h2, h3, .headline",
-            "text": ".excerpt, .summary, p",
-            "link": "a[href]",
-            "image": "img",
-        },
-    },
-    {
-        "name": "gamblingnews",
-        "url": "https://www.gamblingnews.com/",
-        "type": "news",
-        "selectors": {
-            "articles": "article, .post-card, .news-card",
-            "title": "h2, h3",
-            "text": ".excerpt, .summary, p",
+            "articles": "div.blog-post-item",
+            "title": "h4.blog-post-item__title, h3.blog-post-item__title, h2, h3",
+            "text": ".blog-post-item__excerpt, p",
             "link": "a[href]",
             "image": "img",
         },
