@@ -738,7 +738,17 @@ async def debug_content_test(request: Request, dry_run: bool = True):
         result["db_error"] = str(e)
         return result
 
-    # Web scraping test
+    # Web scraping test — also do a direct HTTP probe to diagnose blocking
+    try:
+        import httpx as _httpx
+        probe = await _httpx.AsyncClient(
+            timeout=10.0, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 Chrome/124.0.0.0"},
+        ).get("https://www.casino.org/news/")
+        result["casino_org_probe"] = probe.status_code
+    except Exception as e:
+        result["casino_org_probe"] = str(e)
+
     try:
         from app.web_content_scraper import scrape_web_sources
         web_items = await scrape_web_sources()
