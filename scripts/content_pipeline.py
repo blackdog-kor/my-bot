@@ -129,7 +129,68 @@ async def run_scrape_and_rewrite() -> int:
         await asyncio.sleep(1.5)
 
     logger.info("=== 저장 완료: %d개 ===", saved_count)
+
+    # ── AI 오리지널 콘텐츠 생성 (스크래핑 신규 없을 때 보충) ──
+    if saved_count == 0:
+        logger.info("신규 스크래핑 없음 — AI 오리지널 콘텐츠 생성 시도")
+        saved_count += await _generate_original_posts()
+
     return saved_count
+
+
+# Casino/betting topic rotation for original content generation
+_ORIGINAL_TOPICS = [
+    "슬롯 잭팟 전략 — 승률 높이는 방법",
+    "오늘의 카지노 보너스 & 프로모션 추천",
+    "블랙잭 기초 전략 — 이기는 패턴",
+    "바카라 베팅 시스템 비교",
+    "라이브 카지노 vs 슬롯 — 어느 쪽이 유리한가",
+    "카지노 입금 보너스 100% 활용법",
+    "스포츠 베팅과 카지노 조합 전략",
+    "주간 빅윈 모음 — 이번 주 최고 당첨",
+    "1WIN 신규 게임 하이라이트",
+    "VIP 프로그램 혜택 완전 분석",
+]
+
+_topic_index: list[int] = [0]  # mutable for rotation
+
+
+async def _generate_original_posts() -> int:
+    """AI로 오리지널 카지노 콘텐츠 생성 후 저장. 저장된 수 반환."""
+    from app.content_rewriter import generate_original_content
+    from app.pg_broadcast import save_channel_content
+    from app.config import settings
+
+    if not (settings.anthropic_api_key or settings.openai_api_key or settings.gemini_api_key):
+        logger.warning("AI 키 없음 — 오리지널 콘텐츠 생성 불가")
+        return 0
+
+    topic = _ORIGINAL_TOPICS[_topic_index[0] % len(_ORIGINAL_TOPICS)]
+    _topic_index[0] += 1
+
+    try:
+        generated = await generate_original_content(topic=topic)
+        if not generated:
+            return 0
+
+        import hashlib
+        import time
+        msg_id = int(hashlib.sha256(f"original:{topic}:{int(time.time()//3600)}".encode()).hexdigest()[:8], 16)
+
+        content_id = save_channel_content(
+            original_text=generated,
+            rewritten_text=generated,
+            media_type="text",
+            source_channel="ai:original",
+            source_msg_id=msg_id,
+        )
+        if content_id:
+            logger.info("AI 오리지널 콘텐츠 #%d 저장 (topic=%s)", content_id, topic)
+            return 1
+    except Exception as e:
+        logger.warning("오리지널 콘텐츠 생성 실패: %s", e)
+
+    return 0
 
 
 async def run_channel_post() -> int:
