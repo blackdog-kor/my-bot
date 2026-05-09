@@ -51,12 +51,22 @@ def _notify(text: str) -> None:
         logger.warning("notify failed: %s", e)
 
 
+def _notion_log(job_label: str, success: bool, detail: str = "") -> None:
+    """Fire-and-forget Notion job result log. Never raises."""
+    try:
+        from app.notion_sync import log_job_result
+        log_job_result(job_label, success, detail)
+    except Exception:
+        pass
+
+
 def _run_script(script_name: str, job_label: str) -> bool:
     """scripts/{script_name} 를 subprocess로 실행. 성공 여부 반환."""
     script_path = ROOT / "scripts" / script_name
     if not script_path.is_file():
         logger.error("Script not found: %s", script_path)
         _notify(f"❌ 스케줄 Job 실패: {job_label}\n파일 없음: {script_path}")
+        _notion_log(job_label, False, "스크립트 파일 없음")
         return False
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
@@ -78,13 +88,17 @@ def _run_script(script_name: str, job_label: str) -> bool:
             if stderr_tail:
                 parts.append(f"\n[stderr]\n{stderr_tail}")
             _notify("".join(parts)[:4000])
+            _notion_log(job_label, False, f"exit {result.returncode}")
             return False
+        _notion_log(job_label, True)
         return True
     except subprocess.TimeoutExpired:
         _notify(f"❌ {job_label} 타임아웃 (2시간)")
+        _notion_log(job_label, False, "2시간 타임아웃")
         return False
     except Exception as e:
         _notify(f"❌ {job_label} 예외: {e}")
+        _notion_log(job_label, False, str(e)[:100])
         return False
 
 
