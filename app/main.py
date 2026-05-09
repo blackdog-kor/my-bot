@@ -771,34 +771,23 @@ async def debug_content_test(request: Request, dry_run: bool = True):
 
     if not dry_run:
         try:
-            from app.channel_poster import check_and_post
-            from app.pg_broadcast import is_content_duplicate, save_channel_content
-            from app.content_rewriter import rewrite_content as rw
-
-            saved = 0
-            for item in web_items[:3]:
-                src = item.get("source_channel", "unknown")
-                msg_id = item.get("message_id", 0)
-                if is_content_duplicate(src, msg_id):
-                    continue
-                text = item.get("text", "").strip()
-                if not text:
-                    continue
-                rewritten = await rw(text, item.get("media_type", "text")) if settings.content_rewrite_enabled else None
-                cid = save_channel_content(
-                    original_text=text,
-                    rewritten_text=rewritten,
-                    media_type=item.get("media_type", "text"),
-                    source_channel=src,
-                    source_msg_id=msg_id,
-                    source_views=item.get("views", 0),
-                )
-                if cid:
-                    saved += 1
-            posted = await check_and_post()
-            result["saved"] = saved
-            result["posted"] = posted
-            result["status"] = "ok"
+            import subprocess
+            from pathlib import Path
+            ROOT = Path(__file__).resolve().parents[1]
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(ROOT)
+            proc = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "content_pipeline.py")],
+                cwd=str(ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            result["returncode"] = proc.returncode
+            result["stdout"] = proc.stdout[-2000:] if proc.stdout else ""
+            result["stderr"] = proc.stderr[-500:] if proc.stderr else ""
+            result["status"] = "ok" if proc.returncode == 0 else "error"
         except Exception as e:
             result["pipeline_error"] = str(e)
             logger.exception("content-test pipeline 실패: %s", e)
