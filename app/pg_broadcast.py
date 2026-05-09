@@ -924,16 +924,18 @@ def save_channel_content(
         return None
 
 
-def is_content_duplicate(source_channel: str, source_msg_id: int) -> bool:
-    """이미 수집된 콘텐츠인지 확인."""
+def is_content_duplicate(source_channel: str, source_msg_id: int, days: int = 7) -> bool:
+    """Check if content was already collected within the last `days` days."""
     try:
         with _get_conn() as conn:
             cur = conn.cursor()
             cur.execute("""
                 SELECT 1 FROM channel_content
-                WHERE source_channel = %s AND source_msg_id = %s
+                WHERE source_channel = %s
+                  AND source_msg_id = %s
+                  AND created_at >= NOW() - (%s * INTERVAL '1 day')
                 LIMIT 1
-            """, (source_channel, source_msg_id))
+            """, (source_channel, source_msg_id, days))
             exists = cur.fetchone() is not None
             cur.close()
             return exists
