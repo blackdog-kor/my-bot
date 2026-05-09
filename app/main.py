@@ -786,7 +786,7 @@ async def debug_content_test(request: Request, dry_run: bool = True):
             )
             result["returncode"] = proc.returncode
             result["stdout"] = proc.stdout[-2000:] if proc.stdout else ""
-            result["stderr"] = proc.stderr[:4000] if proc.stderr else ""
+            result["stderr"] = proc.stderr if proc.stderr else ""
             result["status"] = "ok" if proc.returncode == 0 else "error"
         except Exception as e:
             result["pipeline_error"] = str(e)
