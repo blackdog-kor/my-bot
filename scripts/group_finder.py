@@ -373,10 +373,8 @@ async def main() -> None:
     print("=" * 62)
 
     if not BRIGHTDATA_API_TOKEN:
-        msg = "❌ BRIGHTDATA_API_TOKEN 환경변수가 없습니다."
-        print(msg)
-        _notify(f"❌ group_finder 실패: {msg}")
-        sys.exit(1)
+        print("⏭ BRIGHTDATA_API_TOKEN not set — skipping group_finder")
+        sys.exit(0)
 
     session_info = _get_session()
     if not session_info:

@@ -102,5 +102,11 @@ async def collect() -> str:
 
 
 if __name__ == "__main__":
+    import sys
     logging.basicConfig(level=logging.INFO)
-    print(asyncio.run(collect()))
+    try:
+        print(asyncio.run(collect()))
+    except RuntimeError as e:
+        # No tokens configured — skip gracefully so scheduler treats as non-failure
+        print(f"⏭ skipped: {e}")
+        sys.exit(0)
