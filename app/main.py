@@ -805,3 +805,56 @@ async def debug_content_test(request: Request, dry_run: bool = True):
         result["status"] = "dry_run_ok"
 
     return result
+
+
+@app.get("/debug/group-topic-test")
+async def debug_group_topic_test(request: Request):
+    """그룹 포럼 토픽 생성 + 게시 수동 테스트.
+
+    - 토픽 미존재 시 8개 자동 생성
+    - campaign_posts에서 다음 게시물을 분류해 토픽에 게시
+    """
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from app.config import settings
+    from app.group_topic_manager import (
+        auto_post_campaign_to_topics,
+        create_forum_topics,
+        ensure_forum_topics_table,
+        list_topics,
+    )
+
+    result: dict = {
+        "group_id": settings.group_id or "(미설정)",
+        "subscribe_bot_token_set": bool(settings.subscribe_bot_token),
+    }
+
+    if not settings.group_id:
+        result["status"] = "error"
+        result["error"] = "GROUP_ID 미설정"
+        return result
+
+    try:
+        ensure_forum_topics_table()
+        topics = list_topics()
+        result["existing_topics"] = len(topics)
+
+        if not topics:
+            result["action"] = "creating_topics"
+            created = await create_forum_topics()
+            result["topics_created"] = len(created)
+            result["created_names"] = [t["name"] for t in created]
+        else:
+            result["action"] = "posting_to_existing_topics"
+            result["topic_names"] = [t["name"] for t in topics]
+
+        posted = await auto_post_campaign_to_topics()
+        result["posted"] = posted
+        result["status"] = "ok"
+    except Exception as e:
+        logger.exception("group-topic-test 실패: %s", e)
+        result["status"] = "error"
+        result["error"] = str(e)
+
+    return result
