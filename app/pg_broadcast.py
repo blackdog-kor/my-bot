@@ -878,9 +878,17 @@ def ensure_channel_content_table() -> None:
                     button_text     TEXT DEFAULT '🎰 지금 플레이하기',
                     status          TEXT NOT NULL DEFAULT 'pending',
                     posted_at       TIMESTAMPTZ,
+                    group_posted    BOOLEAN DEFAULT FALSE,
+                    group_posted_at TIMESTAMPTZ,
                     created_at      TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # Add columns to existing table if missing (idempotent migration)
+            for col_ddl in [
+                "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS group_posted BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS group_posted_at TIMESTAMPTZ",
+            ]:
+                cur.execute(col_ddl)
             conn.commit()
             cur.close()
             logger.info("ensure_channel_content_table: OK")
@@ -1029,3 +1037,47 @@ def count_channel_content() -> dict:
     except Exception as e:
         logger.warning("count_channel_content failed: %s", e)
         return {"total": 0, "pending": 0, "posted": 0}
+
+
+def get_pending_group_content(limit: int = 3) -> list[dict]:
+    """채널 게시 완료 but 그룹 토픽 미게시 콘텐츠 반환."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, original_text, rewritten_text, media_type,
+                       file_id, affiliate_url, button_text, source_channel
+                FROM channel_content
+                WHERE status = 'posted' AND group_posted = FALSE
+                ORDER BY posted_at ASC
+                LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
+            cur.close()
+            return [
+                {
+                    "id": r[0], "original_text": r[1], "rewritten_text": r[2],
+                    "media_type": r[3], "file_id": r[4], "affiliate_url": r[5],
+                    "button_text": r[6], "source_channel": r[7],
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        logger.warning("get_pending_group_content failed: %s", e)
+        return []
+
+
+def mark_group_posted(content_id: int) -> None:
+    """콘텐츠를 그룹 게시 완료로 마킹."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE channel_content
+                SET group_posted = TRUE, group_posted_at = NOW()
+                WHERE id = %s
+            """, (content_id,))
+            conn.commit()
+            cur.close()
+    except Exception as e:
+        logger.warning("mark_group_posted failed: %s", e)

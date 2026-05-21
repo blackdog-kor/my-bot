@@ -23,6 +23,7 @@ __all__ = [
     "ensure_forum_topics_table",
     "list_topics",
     "save_topic",
+    "post_channel_content_to_topics",
     "get_topic_by_content_type",
     "create_forum_topics",
     "classify_content",
@@ -315,3 +316,75 @@ async def auto_post_campaign_to_topics(
     )
 
     return 1 if success else 0
+
+
+async def post_channel_content_to_topics(
+    limit: int = 3,
+    bot_token: str | None = None,
+    group_id: str | None = None,
+) -> int:
+    """channel_content(채널 게시 완료)를 그룹 토픽에 분류 게시.
+
+    완전 자동화 흐름: channel_content → classify → 토픽 게시 → mark group_posted
+    Returns:
+        게시된 수
+    """
+    from app.pg_broadcast import get_pending_group_content, mark_group_posted, get_campaign_config
+
+    gid = group_id or settings.group_id
+    if not gid:
+        logger.info("GROUP_ID 미설정 — 그룹 토픽 게시 스킵")
+        return 0
+
+    # 토픽 없으면 먼저 생성
+    topics = list_topics()
+    if not topics:
+        logger.info("포럼 토픽 미존재 — 자동 생성 시도")
+        created = await create_forum_topics(bot_token=bot_token, group_id=gid)
+        if not created:
+            logger.error("토픽 생성 실패 — 그룹 게시 중단")
+            return 0
+
+    cfg = get_campaign_config()
+    affiliate_url = (cfg.get("affiliate_url") or "").strip() or settings.affiliate_url
+    btn_text = (cfg.get("button_text") or "🎰 VIP 카지노 입장").strip()
+
+    items = get_pending_group_content(limit=limit)
+    if not items:
+        logger.info("그룹 토픽 게시 대상 없음 (channel_content 전부 게시됨)")
+        return 0
+
+    posted = 0
+    for item in items:
+        text = item.get("rewritten_text") or item.get("original_text") or ""
+        if not text.strip():
+            mark_group_posted(item["id"])
+            continue
+
+        # source_channel이 'sports'이면 스포츠 토픽 우선, 아니면 텍스트 분류
+        if (item.get("source_channel") or "").startswith("sports"):
+            content_type = "sports"
+        else:
+            content_type = classify_content(text)
+
+        # 해당 토픽 없으면 일반(promotion)으로 fallback
+        if not get_topic_by_content_type(content_type):
+            content_type = "promotion"
+
+        success = await post_to_topic(
+            content_type=content_type,
+            text=text,
+            file_id=item.get("file_id"),
+            file_type=item.get("media_type", "text"),
+            bot_token=bot_token,
+            group_id=gid,
+            affiliate_url=item.get("affiliate_url") or affiliate_url,
+            button_text=item.get("button_text") or btn_text,
+        )
+        if success:
+            mark_group_posted(item["id"])
+            posted += 1
+        await asyncio.sleep(1.0)
+
+    logger.info("그룹 토픽 자동 게시 완료: %d건", posted)
+    return posted

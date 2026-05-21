@@ -155,14 +155,15 @@ async def run_sports_collect_and_generate() -> int:
     return saved_count
 
 
-async def run_sports_post() -> int:
-    """Post saved sports content to forum topic or channel."""
+async def run_sports_post() -> tuple[int, int]:
+    """스포츠 콘텐츠를 채널 게시 후 그룹 스포츠 토픽에도 게시.
+
+    Returns:
+        (채널 게시 수, 그룹 토픽 게시 수)
+    """
     from app.config import settings
-    from app.group_topic_manager import (
-        get_topic_by_content_type,
-        post_to_topic,
-    )
     from app.channel_poster import post_to_channel
+    from app.group_topic_manager import post_channel_content_to_topics
     from app.pg_broadcast import (
         get_pending_channel_content,
         mark_content_posted,
@@ -171,55 +172,42 @@ async def run_sports_post() -> int:
     logger.info("=== 스포츠 콘텐츠 게시 시작 ===")
 
     pending = get_pending_channel_content(limit=settings.sports_max_daily_posts)
-    if not pending:
-        logger.info("게시 대기 콘텐츠 없음")
-        return 0
+    sports_pending = [p for p in pending if "sports" in (p.get("source_channel") or "")]
 
-    posted = 0
-    for item in pending:
+    if not sports_pending:
+        logger.info("게시 대기 스포츠 콘텐츠 없음")
+        return 0, 0
+
+    ch_posted = 0
+    for item in sports_pending:
         text = item.get("rewritten_text") or item.get("original_text", "")
-        source = item.get("source_channel", "")
-
-        # Only process sports content
-        if "sports" not in source:
+        if not text.strip():
+            mark_content_posted(item["id"])
             continue
 
-        # Try forum topic first
-        if settings.group_id:
-            sports_topic = get_topic_by_content_type("sports")
-            if sports_topic:
-                success = await post_to_topic(
-                    content_type="sports",
-                    text=text,
-                    file_id=None,
-                    file_type="text",
-                )
-                if success:
-                    mark_content_posted(item["id"])
-                    posted += 1
-                    logger.info("토픽 게시 완료: 콘텐츠 #%d", item["id"])
-                    await asyncio.sleep(3.0)
-                    continue
-
-        # Fallback: channel post
         if settings.channel_id:
             success = await post_to_channel({"text": text, "media_type": "text"})
             if success:
                 mark_content_posted(item["id"])
-                posted += 1
+                ch_posted += 1
                 logger.info("채널 게시 완료: 콘텐츠 #%d", item["id"])
 
         await asyncio.sleep(3.0)
 
-    logger.info("=== 스포츠 콘텐츠 게시 완료: %d건 ===", posted)
-    return posted
+    # 채널 게시 완료 → 그룹 스포츠 토픽에 자동 반영 (group_posted 흐름)
+    grp_posted = 0
+    if settings.group_id and ch_posted > 0:
+        grp_posted = await post_channel_content_to_topics(limit=ch_posted)
+
+    logger.info("=== 스포츠 게시 완료: 채널 %d건 / 그룹 %d건 ===", ch_posted, grp_posted)
+    return ch_posted, grp_posted
 
 
 async def main() -> None:
     """Full sports pipeline execution."""
     import httpx
 
-    bot_token = os.getenv("BOT_TOKEN", "")
+    bot_token = os.getenv("SUBSCRIBE_BOT_TOKEN", "")
     admin_id = os.getenv("ADMIN_ID", "")
 
     def notify(text: str) -> None:
@@ -236,12 +224,13 @@ async def main() -> None:
 
     try:
         saved = await run_sports_collect_and_generate()
-        posted = await run_sports_post()
+        ch_posted, grp_posted = await run_sports_post()
 
         result = (
             f"⚽ [스포츠 자동화] 완료!\n"
             f"• AI 콘텐츠 생성: {saved}건\n"
-            f"• 게시 완료: {posted}건"
+            f"• 채널 게시: {ch_posted}건\n"
+            f"• 그룹 토픽 게시: {grp_posted}건"
         )
         logger.info(result)
         notify(result)

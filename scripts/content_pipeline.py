@@ -203,11 +203,25 @@ async def run_channel_post() -> int:
     return posted
 
 
+async def run_group_topic_post() -> int:
+    """채널 게시 완료 콘텐츠를 그룹 토픽에 분류 게시. 게시된 수 반환."""
+    from app.group_topic_manager import post_channel_content_to_topics
+    from app.config import settings
+
+    if not settings.group_id:
+        return 0
+
+    logger.info("=== 그룹 토픽 게시 시작 ===")
+    posted = await post_channel_content_to_topics(limit=3)
+    logger.info("=== 그룹 토픽 게시 완료: %d개 ===", posted)
+    return posted
+
+
 async def main() -> None:
     """전체 파이프라인 실행."""
     import httpx
 
-    bot_token = os.getenv("BOT_TOKEN", "")
+    bot_token = os.getenv("SUBSCRIBE_BOT_TOKEN", "")
     admin_id = os.getenv("ADMIN_ID", "")
 
     def notify(text: str) -> None:
@@ -229,10 +243,14 @@ async def main() -> None:
         # Phase 2: 채널 게시
         posted = await run_channel_post()
 
+        # Phase 3: 그룹 토픽 게시 (채널 게시 완료 콘텐츠 → 그룹 토픽 자동 분류)
+        group_posted = await run_group_topic_post()
+
         result = (
             f"📺 [콘텐츠 자동화] 완료!\n"
             f"• 새 콘텐츠 수집: {saved}개\n"
-            f"• 채널 게시: {posted}개"
+            f"• 채널 게시: {posted}개\n"
+            f"• 그룹 토픽 게시: {group_posted}개"
         )
         logger.info(result)
         notify(result)
