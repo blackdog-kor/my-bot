@@ -809,21 +809,22 @@ async def debug_content_test(request: Request, dry_run: bool = True):
 
 @app.get("/debug/group-topic-test")
 async def debug_group_topic_test(request: Request):
-    """그룹 포럼 토픽 생성 + 게시 수동 테스트.
+    """그룹 포럼 토픽 게시 수동 테스트 (channel_content 기반 완전 자동화).
 
-    - 토픽 미존재 시 8개 자동 생성
-    - campaign_posts에서 다음 게시물을 분류해 토픽에 게시
+    - 토픽 미존재 시 자동 생성
+    - channel_content(채널 게시 완료, 그룹 미게시) → 분류 → 토픽 게시
     """
     if not _check_debug_auth(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     from app.config import settings
     from app.group_topic_manager import (
-        auto_post_campaign_to_topics,
         create_forum_topics,
         ensure_forum_topics_table,
         list_topics,
+        post_channel_content_to_topics,
     )
+    from app.pg_broadcast import get_pending_group_content
 
     result: dict = {
         "group_id": settings.group_id or "(미설정)",
@@ -846,10 +847,13 @@ async def debug_group_topic_test(request: Request):
             result["topics_created"] = len(created)
             result["created_names"] = [t["name"] for t in created]
         else:
-            result["action"] = "posting_to_existing_topics"
+            result["action"] = "posting_channel_content_to_topics"
             result["topic_names"] = [t["name"] for t in topics]
 
-        posted = await auto_post_campaign_to_topics()
+        pending = get_pending_group_content(limit=10)
+        result["pending_group_content"] = len(pending)
+
+        posted = await post_channel_content_to_topics(limit=3)
         result["posted"] = posted
         result["status"] = "ok"
     except Exception as e:
