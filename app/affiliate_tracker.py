@@ -183,7 +183,7 @@ async def get_report(limit: int = 7):
 
 
 def _notify_admin(payload: AffiliateStatsPayload):
-    bot_token = os.getenv("BOT_TOKEN", "")
+    bot_token = os.getenv("SUBSCRIBE_BOT_TOKEN", "")
     admin_id  = os.getenv("ADMIN_ID", "")
     if not bot_token or not admin_id:
         return

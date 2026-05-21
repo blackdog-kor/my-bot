@@ -27,7 +27,7 @@ logger = get_logger("scheduler")
 ROOT = Path(__file__).resolve().parents[1]  # repo root (app/scheduler.py)
 _job_lock = threading.Lock()
 
-BOT_TOKEN = settings.bot_token
+BOT_TOKEN = settings.subscribe_bot_token
 ADMIN_ID: int | None = settings.admin_id or None
 
 
