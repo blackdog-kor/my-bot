@@ -105,7 +105,30 @@ def _parse_match(m: dict, league_id: int) -> Match:
     )
 
 
-async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int = 3) -> SportsData:
+async def fetch_competition_scorers(code: str) -> list[dict]:
+    """Fetch top scorers for a competition from Football-Data.org.
+
+    Returns up to 5 entries: [{"name": str, "team": str, "goals": int}]
+    """
+    try:
+        data = await _fd_request(f"/competitions/{code}/scorers", {"limit": 5})
+        scorers = []
+        for entry in data.get("scorers", [])[:5]:
+            player = entry.get("player", {})
+            team = entry.get("team", {})
+            scorers.append({
+                "name": player.get("name", ""),
+                "team": team.get("name", ""),
+                "goals": entry.get("goals", 0),
+            })
+        logger.info("FD scorers %s: %d entries", code, len(scorers))
+        return scorers
+    except Exception as e:
+        logger.warning("FD scorers failed (%s): %s", code, e)
+        return []
+
+
+async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int = 30) -> SportsData:
     """Fetch upcoming + recent matches + standings for one league."""
     code = LEAGUE_TO_FD_CODE.get(league_id)
     if not code:
@@ -148,11 +171,15 @@ async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int 
                         losses=row.get("lost", 0),
                         goals_for=row.get("goalsFor", 0),
                         goals_against=row.get("goalsAgainst", 0),
+                        goal_difference=row.get("goalDifference", 0),
                         points=row.get("points", 0),
+                        form=row.get("form", ""),
                     ))
                 break
     except Exception as e:
         logger.warning("FD standings failed (%s): %s", code, e)
+
+    sd.scorers = await fetch_competition_scorers(code)
 
     return sd
 

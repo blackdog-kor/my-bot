@@ -137,6 +137,7 @@ class TeamStanding:
     losses: int = 0
     goals_for: int = 0
     goals_against: int = 0
+    goal_difference: int = 0
     form: str = ""  # e.g., "WWDLW"
 
 
@@ -147,6 +148,7 @@ class SportsData:
     upcoming: list[Match] = field(default_factory=list)
     recent_results: list[Match] = field(default_factory=list)
     standings: list[TeamStanding] = field(default_factory=list)
+    scorers: list[dict] = field(default_factory=list)
     league_id: int = 0
     league_name: str = ""
     fetched_at: datetime = field(

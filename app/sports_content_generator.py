@@ -22,6 +22,7 @@ from app.sports_prompts import (
     STANDINGS_SYSTEM_PROMPT,
     build_odds_section,
 )
+from app.sports_context_builder import build_real_match_context
 from app.sports_scraper import LEAGUE_EMOJI, LEAGUE_NAMES, Match, SportsData, TeamStanding
 
 logger = get_logger("sports_content_generator")
@@ -90,13 +91,25 @@ async def _build_card(match: Match, pick: str, stars: int, confidence: int, odds
 
 async def generate_match_preview(
     match: Match, cta_url: str = "", odds=None, accuracy_line: str = "",
+    sd: SportsData | None = None,
 ) -> dict[str, Any]:
     """Generate premium match preview: AI text + match card + pick record."""
     emoji = LEAGUE_EMOJI.get(match.league_id, "⚽")
     odds_section = build_odds_section(odds)
+
+    real_context = ""
+    if sd:
+        real_context = build_real_match_context(
+            match,
+            all_results=sd.recent_results,
+            standings=sd.standings,
+            scorers=getattr(sd, "scorers", None),
+        )
+
     user_prompt = (
-        f"Generate a match preview:\n\n{_fmt_match(match, odds_section)}\n\n"
-        f"League emoji: {emoji}\nMonthly accuracy: {accuracy_line or 'N/A'}"
+        f"Generate a match preview for:\n\n{_fmt_match(match, odds_section)}\n\n"
+        f"League emoji: {emoji}\nMonthly accuracy: {accuracy_line or 'N/A'}\n\n"
+        f"{real_context}"
     )
     text = await generate_text(PREVIEW_SYSTEM_PROMPT, user_prompt, _cta_html(cta_url))
     pick, stars, confidence = _extract_pick(text or "")
@@ -178,7 +191,7 @@ async def generate_daily_sports_content(
             if len(posts) >= max_posts:
                 break
             odds = match_odds_to_game(match.home_team, match.away_team, league_odds)
-            post = await generate_match_preview(match, cta_url, odds, accuracy_line)
+            post = await generate_match_preview(match, cta_url, odds, accuracy_line, sd=sd)
             post.update({"media_type": "photo", "source": f"api:sports:{sd.league_name}", "league_id": sd.league_id})
             posts.append(post)
 
