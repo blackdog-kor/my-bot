@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     sports_post_interval_hours: int = 6  # hours between sports posts
     sports_max_daily_posts: int = 4  # max sports posts per day
     sports_topic_content_type: str = "sports"  # content_type for forum topic routing
+    pexels_api_key: str = ""  # Pexels API key for sports post images (free: 200 req/hr)
 
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""

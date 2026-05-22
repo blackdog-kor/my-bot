@@ -2,16 +2,15 @@
 Channel Poster: 채널에 콘텐츠를 자동 게시.
 
 - channel_content 테이블에서 미게시 콘텐츠를 순차 발송
+- image_url이 있으면 다운로드 후 send_photo (고화질 이미지 첨부)
 - 인라인 버튼(어필리에이트 링크) 자동 첨부
 - 게시 간격 관리 (스팸 방지)
-- 게시 후 성과 추적 (조회수)
 """
 from __future__ import annotations
 
 import asyncio
-import os
+import io
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +23,21 @@ from app.logging_config import get_logger
 logger = get_logger("channel_poster")
 
 
+async def _download_image(url: str) -> bytes | None:
+    """Download image bytes from URL with timeout."""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                return resp.content
+            logger.warning("Image download HTTP %d: %s", resp.status_code, url)
+            return None
+    except Exception as e:
+        logger.warning("Image download failed: %s", e)
+        return None
+
+
 async def post_to_channel(
     content: dict[str, Any],
     bot_token: str | None = None,
@@ -32,7 +46,7 @@ async def post_to_channel(
     """채널에 단일 콘텐츠 게시.
 
     Args:
-        content: {text, media_type, affiliate_url?, button_text?}
+        content: {text, media_type, file_id?, image_url?, affiliate_url?, button_text?}
         bot_token: 봇 토큰 (None이면 settings에서 로드)
         channel_id: 채널 ID (None이면 settings에서 로드)
 
@@ -56,7 +70,6 @@ async def post_to_channel(
     affiliate_url = content.get("affiliate_url") or settings.affiliate_url or settings.vip_url
     button_text = content.get("button_text", "🎰 지금 플레이하기")
 
-    # 인라인 버튼 생성
     keyboard = None
     if affiliate_url:
         keyboard = InlineKeyboardMarkup([
@@ -64,11 +77,30 @@ async def post_to_channel(
         ])
 
     try:
+        # Priority 1: image_url (download → send_photo with caption)
+        image_url = content.get("image_url")
+        if image_url:
+            img_bytes = await _download_image(image_url)
+            if img_bytes:
+                bio = io.BytesIO(img_bytes)
+                bio.name = "sports.jpg"
+                await bot.send_photo(
+                    chat_id=ch_id,
+                    photo=bio,
+                    caption=text[:1024],  # Telegram caption limit
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+                logger.info("채널 이미지 게시 성공: %s (%d chars)", ch_id, len(text))
+                return True
+            logger.warning("Image download failed — falling back to text post")
+
+        # Priority 2: Telegram file_id photo/video
         if content.get("media_type") == "photo" and content.get("file_id"):
             await bot.send_photo(
                 chat_id=ch_id,
                 photo=content["file_id"],
-                caption=text,
+                caption=text[:1024],
                 reply_markup=keyboard,
                 parse_mode="HTML",
             )
@@ -76,12 +108,11 @@ async def post_to_channel(
             await bot.send_video(
                 chat_id=ch_id,
                 video=content["file_id"],
-                caption=text,
+                caption=text[:1024],
                 reply_markup=keyboard,
                 parse_mode="HTML",
             )
         else:
-            # 텍스트 전용 게시
             await bot.send_message(
                 chat_id=ch_id,
                 text=text,
@@ -99,14 +130,7 @@ async def post_to_channel(
 
 
 async def post_pending_content(max_posts: int = 1) -> int:
-    """미게시 콘텐츠를 채널에 게시.
-
-    Args:
-        max_posts: 한 번에 게시할 최대 수
-
-    Returns:
-        실제 게시된 수
-    """
+    """미게시 콘텐츠를 채널에 게시."""
     from app.pg_broadcast import get_pending_channel_content, mark_content_posted
 
     pending = get_pending_channel_content(limit=max_posts)
@@ -120,6 +144,7 @@ async def post_pending_content(max_posts: int = 1) -> int:
             "text": item["rewritten_text"] or item["original_text"],
             "media_type": item.get("media_type", "text"),
             "file_id": item.get("file_id"),
+            "image_url": item.get("image_url"),
             "affiliate_url": item.get("affiliate_url"),
             "button_text": item.get("button_text", "🎰 지금 플레이하기"),
         }
@@ -132,7 +157,6 @@ async def post_pending_content(max_posts: int = 1) -> int:
         else:
             logger.warning("콘텐츠 #%d 게시 실패", item["id"])
 
-        # 게시 간 딜레이
         if posted < len(pending):
             await asyncio.sleep(5.0)
 
@@ -147,9 +171,7 @@ async def check_and_post() -> int:
     max_daily = settings.content_max_daily_posts
 
     if today_count >= max_daily:
-        logger.info(
-            "오늘 게시 한도 도달: %d/%d", today_count, max_daily
-        )
+        logger.info("오늘 게시 한도 도달: %d/%d", today_count, max_daily)
         return 0
 
     remaining = max_daily - today_count

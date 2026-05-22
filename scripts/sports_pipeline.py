@@ -41,8 +41,6 @@ async def run_sports_collect_and_generate() -> int:
     )
     from app.sports_content_generator import (
         generate_daily_sports_content,
-        generate_match_preview_template,
-        generate_match_review_template,
     )
     from app.sports_scraper import (
         collect_sports_data,
@@ -75,50 +73,16 @@ async def run_sports_collect_and_generate() -> int:
     # ── Phase 2: AI content generation ──
     logger.info("=== AI 스포츠 콘텐츠 생성 시작 ===")
 
-    affiliate_url = settings.affiliate_url or settings.vip_url
-    cta_text = f"👉 스포츠 베팅 시작하기"
+    cta_url = settings.affiliate_url or settings.vip_url or ""
 
     posts: list[dict] = []
 
     if sports_data:
-        # AI generation with collected data
-        has_ai_key = bool(
-            settings.anthropic_api_key
-            or settings.openai_api_key
-            or os.getenv("OPENAI_API_KEY", "")
-            or settings.gemini_api_key
+        posts = await generate_daily_sports_content(
+            sports_data,
+            max_posts=settings.sports_max_daily_posts,
+            cta_url=cta_url,
         )
-
-        if has_ai_key:
-            posts = await generate_daily_sports_content(
-                sports_data,
-                max_posts=settings.sports_max_daily_posts,
-                cta_text=cta_text,
-            )
-        else:
-            # Template fallback (no AI key)
-            logger.info("AI 키 미설정 — 템플릿 폴백 사용")
-            for sd in sports_data:
-                for match in sd.upcoming[:2]:
-                    text = generate_match_preview_template(match)
-                    posts.append({
-                        "text": text,
-                        "content_type": "sports_preview",
-                        "media_type": "text",
-                        "source": f"template:sports:{sd.league_name}",
-                        "match_id": match.match_id,
-                        "league_id": sd.league_id,
-                    })
-                for match in sd.recent_results[:1]:
-                    text = generate_match_review_template(match)
-                    posts.append({
-                        "text": text,
-                        "content_type": "sports_review",
-                        "media_type": "text",
-                        "source": f"template:sports:{sd.league_name}",
-                        "match_id": match.match_id,
-                        "league_id": sd.league_id,
-                    })
 
     if not posts:
         logger.warning("스포츠 콘텐츠 생성 결과 없음")
@@ -139,10 +103,11 @@ async def run_sports_collect_and_generate() -> int:
         content_id = save_channel_content(
             original_text=post["text"],
             rewritten_text=post["text"],  # Already AI-generated
-            media_type=post.get("media_type", "text"),
+            media_type=post.get("media_type", "photo"),
             source_channel=source,
             source_msg_id=match_id,
             source_views=0,
+            image_url=post.get("image_url"),
         )
 
         if content_id:

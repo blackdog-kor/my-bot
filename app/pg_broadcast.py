@@ -887,6 +887,7 @@ def ensure_channel_content_table() -> None:
             for col_ddl in [
                 "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS group_posted BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS group_posted_at TIMESTAMPTZ",
+                "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS image_url TEXT",
             ]:
                 cur.execute(col_ddl)
             conn.commit()
@@ -906,6 +907,7 @@ def save_channel_content(
     source_views: int = 0,
     affiliate_url: str | None = None,
     button_text: str = "🎰 지금 플레이하기",
+    image_url: str | None = None,
 ) -> int | None:
     """채널 콘텐츠 저장. 삽입된 id 반환."""
     try:
@@ -915,13 +917,13 @@ def save_channel_content(
                 INSERT INTO channel_content
                     (original_text, rewritten_text, media_type, file_id,
                      source_channel, source_msg_id, source_views,
-                     affiliate_url, button_text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     affiliate_url, button_text, image_url)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 original_text, rewritten_text, media_type, file_id,
                 source_channel, source_msg_id, source_views,
-                affiliate_url, button_text,
+                affiliate_url, button_text, image_url,
             ))
             row = cur.fetchone()
             conn.commit()
@@ -959,7 +961,7 @@ def get_pending_channel_content(limit: int = 5) -> list[dict]:
             cur = conn.cursor()
             cur.execute("""
                 SELECT id, original_text, rewritten_text, media_type,
-                       file_id, affiliate_url, button_text
+                       file_id, affiliate_url, button_text, image_url
                 FROM channel_content
                 WHERE status = 'pending'
                 ORDER BY created_at ASC
@@ -972,7 +974,7 @@ def get_pending_channel_content(limit: int = 5) -> list[dict]:
                     "id": r[0], "original_text": r[1],
                     "rewritten_text": r[2], "media_type": r[3],
                     "file_id": r[4], "affiliate_url": r[5],
-                    "button_text": r[6],
+                    "button_text": r[6], "image_url": r[7],
                 }
                 for r in rows
             ]
@@ -1046,7 +1048,7 @@ def get_pending_group_content(limit: int = 3) -> list[dict]:
             cur = conn.cursor()
             cur.execute("""
                 SELECT id, original_text, rewritten_text, media_type,
-                       file_id, affiliate_url, button_text, source_channel
+                       file_id, affiliate_url, button_text, source_channel, image_url
                 FROM channel_content
                 WHERE status = 'posted' AND group_posted = FALSE
                 ORDER BY posted_at ASC
@@ -1058,7 +1060,7 @@ def get_pending_group_content(limit: int = 3) -> list[dict]:
                 {
                     "id": r[0], "original_text": r[1], "rewritten_text": r[2],
                     "media_type": r[3], "file_id": r[4], "affiliate_url": r[5],
-                    "button_text": r[6], "source_channel": r[7],
+                    "button_text": r[6], "source_channel": r[7], "image_url": r[8],
                 }
                 for r in rows
             ]
