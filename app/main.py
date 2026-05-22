@@ -704,6 +704,42 @@ async def debug_sports_test(request: Request, league_id: int = 0):
     return result
 
 
+@app.get("/debug/fd-test")
+async def debug_fd_test(request: Request, league_id: int = 39):
+    """Football-Data.org 직접 테스트 (현재 시즌 데이터 확인).
+
+    league_id: 39=PL, 140=La Liga, 135=Serie A, 78=Bundesliga, 1=World Cup
+    """
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    if not settings.football_data_api_key:
+        return {"error": "FOOTBALL_DATA_API_KEY not set"}
+    try:
+        from app.football_data_client import collect_sports_data_fd
+        sports_data = await collect_sports_data_fd(league_ids=[league_id])
+        if not sports_data:
+            return {"status": "no_data", "league_id": league_id, "message": "League not supported or no fixtures"}
+        sd = sports_data[0]
+        return {
+            "status": "ok",
+            "league": sd.league_name,
+            "league_id": sd.league_id,
+            "upcoming_count": len(sd.upcoming),
+            "results_count": len(sd.recent_results),
+            "standings_count": len(sd.standings),
+            "upcoming_sample": [
+                f"{m.home_team} vs {m.away_team} — {m.match_date}"
+                for m in sd.upcoming[:5]
+            ],
+            "results_sample": [
+                f"{m.home_team} {m.home_score}-{m.away_score} {m.away_team}"
+                for m in sd.recent_results[:5]
+            ],
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 @app.get("/debug/sports-raw")
 async def debug_sports_raw(request: Request, league_id: int = 292, season: int = 0):
     """Raw API-Football fixture call — shows exact response for debugging."""
