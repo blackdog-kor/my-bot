@@ -962,7 +962,8 @@ def get_pending_channel_content(limit: int = 5) -> list[dict]:
             cur = conn.cursor()
             cur.execute("""
                 SELECT id, original_text, rewritten_text, media_type,
-                       file_id, affiliate_url, button_text, image_url
+                       file_id, affiliate_url, button_text, image_url,
+                       source_channel
                 FROM channel_content
                 WHERE status = 'pending'
                 ORDER BY created_at ASC
@@ -976,6 +977,7 @@ def get_pending_channel_content(limit: int = 5) -> list[dict]:
                     "rewritten_text": r[2], "media_type": r[3],
                     "file_id": r[4], "affiliate_url": r[5],
                     "button_text": r[6], "image_url": r[7],
+                    "source_channel": r[8],
                 }
                 for r in rows
             ]
