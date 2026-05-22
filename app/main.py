@@ -732,7 +732,7 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     diag: dict = {
-        "v": "eb68428",
+        "v": "6b992d0",
         "football_data_key_set": bool(settings.football_data_api_key),
         "channel_id_set": bool(settings.channel_id),
         "group_id_set": bool(settings.group_id),
