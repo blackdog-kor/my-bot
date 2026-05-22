@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     pexels_api_key: str = ""  # Pexels API key for sports post images (free: 200 req/hr)
     odds_api_key: str = ""   # The Odds API key for real betting odds (free: 500 req/month)
 
+    # ── Match Scheduler (real-time 30-min job) ────────────────────
+    match_preview_hours_before: int = 3   # post preview this many hours before kickoff
+    match_review_mins_after: int = 110    # post review this many minutes after kickoff
+    match_schedule_days_ahead: int = 3    # days ahead to populate match schedule table
+
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""
 

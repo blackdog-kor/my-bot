@@ -54,7 +54,7 @@ async def run_sports_collect_and_generate() -> int:
     if settings.sports_api_key:
         logger.info("=== API-Football 데이터 수집 시작 ===")
         try:
-            sports_data = await collect_sports_data()
+            sports_data = await collect_sports_data(days_ahead=settings.match_schedule_days_ahead)
             total = sum(
                 len(sd.upcoming) + len(sd.recent_results)
                 for sd in sports_data
@@ -69,6 +69,46 @@ async def run_sports_collect_and_generate() -> int:
             logger.info("웹 폴백 수집: %d건", len(web_data))
         except Exception as e:
             logger.warning("웹 폴백도 실패: %s", e)
+
+    # ── Phase 1.5: Populate match_schedule for real-time 30-min job ──
+    if sports_data:
+        try:
+            from app.match_schedule_db import ensure_match_schedule_table, upsert_match
+            from app.odds_fetcher import LEAGUE_SPORT_KEY, fetch_odds_for_league, match_odds_to_game
+
+            ensure_match_schedule_table()
+            odds_cache: dict[int, list] = {}
+            upserted = 0
+            for sd in sports_data:
+                if settings.odds_api_key and sd.league_id in LEAGUE_SPORT_KEY and sd.league_id not in odds_cache:
+                    try:
+                        odds_cache[sd.league_id] = await fetch_odds_for_league(sd.league_id)
+                    except Exception:
+                        odds_cache[sd.league_id] = []
+                for match in sd.upcoming:
+                    if not match.match_id or not match.match_date:
+                        continue
+                    league_odds = odds_cache.get(sd.league_id, [])
+                    odds = match_odds_to_game(match.home_team, match.away_team, league_odds)
+                    odds_dict = None
+                    if odds and odds.has_odds:
+                        odds_dict = {
+                            "home_win": odds.home_win, "draw": odds.draw, "away_win": odds.away_win,
+                            "over_2_5": odds.over_2_5, "under_2_5": odds.under_2_5,
+                            "btts_yes": odds.btts_yes, "btts_no": odds.btts_no,
+                        }
+                    ok = upsert_match(
+                        match_id=match.match_id, league_id=sd.league_id,
+                        home_team=match.home_team, away_team=match.away_team,
+                        kickoff_utc=match.match_date, league_name=match.league_name,
+                        venue=match.venue or "", round_name=match.round_name or "",
+                        odds_dict=odds_dict,
+                    )
+                    if ok:
+                        upserted += 1
+            logger.info("match_schedule 업서트 완료: %d건", upserted)
+        except Exception as e:
+            logger.warning("match_schedule 업서트 실패: %s", e)
 
     # ── Phase 2: AI content generation ──
     logger.info("=== AI 스포츠 콘텐츠 생성 시작 ===")

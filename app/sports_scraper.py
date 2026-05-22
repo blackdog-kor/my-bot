@@ -410,11 +410,15 @@ async def _scrape_sports_web() -> list[dict[str, Any]]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def collect_sports_data(league_id: int | None = None) -> list[SportsData]:
+async def collect_sports_data(
+    league_id: int | None = None,
+    days_ahead: int = 7,
+) -> list[SportsData]:
     """Collect comprehensive sports data for all configured leagues.
 
     Args:
         league_id: Specific league ID (None = all configured).
+        days_ahead: Days ahead to fetch upcoming fixtures.
 
     Returns:
         List of SportsData per league.
@@ -429,7 +433,7 @@ async def collect_sports_data(league_id: int | None = None) -> list[SportsData]:
         )
 
         # Parallel fetch: upcoming + recent results + standings
-        upcoming_task = fetch_upcoming_matches(lid)
+        upcoming_task = fetch_upcoming_matches(lid, days_ahead=days_ahead)
         results_task = fetch_recent_results(lid)
         standings_task = fetch_standings(lid)
 

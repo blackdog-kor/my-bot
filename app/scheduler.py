@@ -179,6 +179,14 @@ def _job_sports_pipeline() -> None:
         _notify("⚽ 스포츠 콘텐츠 완료" if ok else "⚽ 스포츠 콘텐츠 실패")
 
 
+def _job_match_scheduler() -> None:
+    """30-min cycle: populate schedule → post previews/reviews per kickoff time."""
+    with _job_lock:
+        ok = _run_script("match_schedule_runner.py", "매치스케줄러(match_schedule_runner)")
+        if not ok:
+            logger.warning("match_schedule_runner 실패")
+
+
 def run_scheduler_forever() -> None:
     scheduler = BackgroundScheduler()
     # 03:00 — 새 그룹 발굴 (group_finder)
@@ -265,6 +273,14 @@ def run_scheduler_forever() -> None:
         _job_sports_pipeline,
         trigger=CronTrigger(hour=10, minute=0),
         id="sports_pipeline_evening",
+    )
+    # 매 30분 — 실시간 경기 스케줄 기반 프리뷰/리뷰 자동 게시
+    # 킥오프 3시간 전 → 프리뷰 / 킥오프 110분 후 → 리뷰
+    scheduler.add_job(
+        _job_match_scheduler,
+        trigger="interval",
+        minutes=30,
+        id="match_scheduler",
     )
     scheduler.start()
 

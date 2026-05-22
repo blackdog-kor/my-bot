@@ -23,16 +23,25 @@ from app.logging_config import get_logger
 logger = get_logger("channel_poster")
 
 
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB guard
+
+
 async def _download_image(url: str) -> bytes | None:
-    """Download image bytes from URL with timeout."""
+    """Download image bytes from URL with timeout and size cap."""
     try:
         import httpx
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             resp = await client.get(url)
-            if resp.status_code == 200:
-                return resp.content
-            logger.warning("Image download HTTP %d: %s", resp.status_code, url)
-            return None
+            if resp.status_code != 200:
+                logger.warning("Image download HTTP %d: %s", resp.status_code, url)
+                return None
+            if len(resp.content) > _MAX_IMAGE_BYTES:
+                logger.warning("Image too large (%d bytes), skipping: %s", len(resp.content), url)
+                return None
+            return resp.content
+    except httpx.HTTPError as e:
+        logger.warning("Image download HTTP error: %s", e)
+        return None
     except Exception as e:
         logger.warning("Image download failed: %s", e)
         return None
@@ -77,6 +86,21 @@ async def post_to_channel(
         ])
 
     try:
+        # Priority 0: card_bytes (Pillow-generated PNG passed directly)
+        card_bytes = content.get("card_bytes")
+        if card_bytes:
+            bio = io.BytesIO(card_bytes)
+            bio.name = "match_card.png"
+            await bot.send_photo(
+                chat_id=ch_id,
+                photo=bio,
+                caption=text[:1024],
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+            logger.info("채널 매치카드 게시 성공: %s (%d chars)", ch_id, len(text))
+            return True
+
         # Priority 1: image_url (download → send_photo with caption)
         image_url = content.get("image_url")
         if image_url:
