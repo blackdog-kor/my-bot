@@ -721,29 +721,88 @@ async def debug_sports_test(request: Request, league_id: int = 0):
 
 @app.get("/debug/run-sports-pipeline")
 async def debug_run_sports_pipeline(request: Request, post: bool = False):
-    """실제 스포츠 파이프라인 수동 실행 (스케줄러와 동일한 경로).
+    """실제 스포츠 파이프라인 수동 실행 — 단계별 진단 포함.
 
-    post=false: 수집 + AI 생성 + DB 저장만 (채널/그룹 게시 안 함)
-    post=true: 수집 + 생성 + DB 저장 + 채널/그룹 실제 게시
+    post=false: 수집+AI생성+DB저장만  post=true: 채널/그룹 실제 게시까지
     """
     if not _check_debug_auth(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    diag: dict = {"football_data_key_set": bool(settings.football_data_api_key)}
     try:
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from scripts.sports_pipeline import run_sports_collect_and_generate, run_sports_post
-        saved = await run_sports_collect_and_generate()
-        result = {"saved_to_db": saved}
+        # Phase 1: collect
+        from app.sports_scraper import collect_sports_data
+        sports_data = []
+        try:
+            sports_data = await collect_sports_data()
+        except Exception as e:
+            diag["apifootball_error"] = str(e)
+
+        has_data = any(sd.upcoming or sd.recent_results for sd in sports_data)
+        diag["apifootball_has_data"] = has_data
+        diag["apifootball_leagues"] = len(sports_data)
+
+        # FD fallback
+        if not has_data and settings.football_data_api_key:
+            from app.football_data_client import collect_sports_data_fd
+            try:
+                sports_data = await collect_sports_data_fd()
+                diag["fd_leagues"] = len(sports_data)
+                diag["fd_upcoming"] = sum(len(sd.upcoming) for sd in sports_data)
+                diag["fd_results"] = sum(len(sd.recent_results) for sd in sports_data)
+                diag["source"] = "football_data_org"
+            except Exception as e:
+                diag["fd_error"] = str(e)
+                diag["source"] = "none"
+        else:
+            diag["source"] = "apifootball" if has_data else "none"
+
+        # Phase 2: AI generation
+        active = [sd for sd in sports_data if sd.upcoming or sd.recent_results]
+        diag["active_leagues"] = len(active)
+        posts = []
+        if active:
+            from app.sports_content_generator import generate_daily_sports_content
+            cta_url = settings.affiliate_url or settings.vip_url or ""
+            try:
+                posts = await generate_daily_sports_content(active, max_posts=2, cta_url=cta_url)
+                diag["posts_generated"] = len(posts)
+                diag["post_preview"] = [p["text"][:200] for p in posts[:2]]
+            except Exception as e:
+                diag["ai_error"] = str(e)
+
+        # Phase 3: DB save
+        from app.pg_broadcast import ensure_channel_content_table, is_content_duplicate, save_channel_content
+        ensure_channel_content_table()
+        saved = 0
+        for p in posts:
+            src = p.get("source", "sports")
+            mid = p.get("match_id", 0)
+            if not is_content_duplicate(src, mid):
+                cid = save_channel_content(
+                    original_text=p["text"], rewritten_text=p["text"],
+                    media_type=p.get("media_type", "photo"),
+                    source_channel=src, source_msg_id=mid, source_views=0,
+                    image_url=p.get("image_url"),
+                )
+                if cid:
+                    saved += 1
+        diag["saved_to_db"] = saved
+
+        # Phase 4: post if requested
         if post and saved > 0:
-            ch_posted, grp_posted = await run_sports_post()
-            result["channel_posted"] = ch_posted
-            result["group_posted"] = grp_posted
-        result["status"] = "ok"
-        return result
+            from scripts.sports_pipeline import run_sports_post
+            ch, grp = await run_sports_post()
+            diag["channel_posted"] = ch
+            diag["group_posted"] = grp
+
+        diag["status"] = "ok"
     except Exception as e:
         logger.exception("run-sports-pipeline 실패: %s", e)
-        return {"status": "error", "error": str(e)}
+        diag["status"] = "error"
+        diag["error"] = str(e)
+
+    return diag
 
 
 @app.get("/debug/fd-test")
