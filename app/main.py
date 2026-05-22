@@ -835,6 +835,30 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
     return diag
 
 
+@app.get("/debug/reset-sports-records")
+async def debug_reset_sports_records(request: Request):
+    """Delete unposted sports records so the pipeline can regenerate with fresh real data."""
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        from app.pg_broadcast import _get_conn
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                DELETE FROM channel_content
+                WHERE source_channel LIKE 'api:sports:%%'
+                  AND status != 'posted'
+                RETURNING id
+            """)
+            deleted_ids = [r[0] for r in cur.fetchall()]
+            conn.commit()
+            cur.close()
+        return {"deleted": len(deleted_ids), "ids": deleted_ids, "status": "ok"}
+    except Exception as e:
+        logger.exception("reset-sports-records 실패: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/debug/fd-test")
 async def debug_fd_test(request: Request, league_id: int = 39):
     """Football-Data.org 직접 테스트 (현재 시즌 데이터 확인).
