@@ -43,6 +43,11 @@ LEAGUE_NAMES: dict[int, str] = {
     1: "FIFA World Cup",
     848: "AFC Champions League",
     292: "K League 1",
+    98: "J1 League",
+    253: "MLS",
+    71: "Brasileirão Série A",
+    128: "Argentine Primera División",
+    262: "Liga MX",
 }
 
 # Emoji mapping per league
@@ -57,6 +62,11 @@ LEAGUE_EMOJI: dict[int, str] = {
     1: "🌍",
     848: "🏆",
     292: "🇰🇷",
+    98: "🇯🇵",
+    253: "🇺🇸",
+    71: "🇧🇷",
+    128: "🇦🇷",
+    262: "🇲🇽",
 }
 
 # Web scraping sources (fallback)
@@ -216,22 +226,34 @@ async def check_api_quota() -> dict:
         return {"error": str(e)}
 
 
-# Leagues whose season number equals the calendar year (Asian leagues).
-# All others (PL, La Liga, etc.) start in Aug and are named by start year.
-_SAME_YEAR_LEAGUES: frozenset[int] = frozenset({292, 848})  # K League 1, AFC CL
+# European leagues that span two calendar years (Aug-May).
+# Their API-Football season is named by the START year: 2025/26 = season 2025.
+# Everything else (Americas, Asia, global tournaments) uses the full calendar year.
+_CROSS_YEAR_LEAGUES: frozenset[int] = frozenset({
+    39,   # Premier League
+    140,  # La Liga
+    135,  # Serie A
+    61,   # Ligue 1
+    78,   # Bundesliga
+    88,   # Eredivisie
+    94,   # Primeira Liga
+    2,    # UEFA Champions League
+    3,    # UEFA Europa League
+    848,  # AFC Champions League (varies but treated as cross-year)
+})
 
 
 def _get_season_year(league_id: int) -> int:
     """Return the correct API-Football season year for a given league.
 
-    European leagues name their season by start year (2025/26 = season 2025).
-    Jan-Jul we are still in the previous start-year's season, so subtract 1.
-    Asian leagues (K League, AFC CL) use the full calendar year directly.
+    Cross-year European leagues: season = start year (Aug-May span).
+    In Jan-Jul we are still in the prior start-year, so subtract 1.
+    All other leagues (Americas, Asia, global) use the full calendar year.
     """
     now = datetime.now(timezone.utc)
-    if league_id in _SAME_YEAR_LEAGUES:
-        return now.year
-    return now.year if now.month >= 8 else now.year - 1
+    if league_id in _CROSS_YEAR_LEAGUES:
+        return now.year if now.month >= 8 else now.year - 1
+    return now.year
 
 
 async def fetch_upcoming_matches(

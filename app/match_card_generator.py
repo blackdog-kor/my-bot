@@ -37,6 +37,12 @@ LEAGUE_COLORS: dict[int, tuple[int, int, int]] = {
     2:   (255, 184, 0),   # Champions League — gold
     3:   (255, 102, 0),   # Europa League — orange
     292: (0, 164, 102),   # K League — green
+    1:   (0, 168, 80),    # FIFA World Cup — FIFA green
+    98:  (188, 0, 45),    # J1 League — red
+    253: (0, 40, 104),    # MLS — dark blue
+    71:  (0, 156, 59),    # Brasileirão — green
+    128: (117, 170, 219), # Argentine Primera — sky blue
+    262: (0, 104, 71),    # Liga MX — green
 }
 _DEFAULT_ACCENT = (30, 90, 200)
 
