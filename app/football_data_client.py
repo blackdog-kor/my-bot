@@ -128,8 +128,17 @@ async def fetch_competition_scorers(code: str) -> list[dict]:
         return []
 
 
-async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int = 30) -> SportsData:
-    """Fetch upcoming + recent matches + standings for one league."""
+async def fetch_league_data(
+    league_id: int,
+    days_ahead: int = 7,
+    days_back: int = 30,
+    sleep_sec: float = 7.0,
+) -> SportsData:
+    """Fetch upcoming + recent matches + standings for one league.
+
+    sleep_sec: delay between API calls to respect 10 calls/min rate limit.
+    Use sleep_sec=1.0 in debug/test contexts where occasional 429s are acceptable.
+    """
     code = LEAGUE_TO_FD_CODE.get(league_id)
     if not code:
         raise ValueError(f"No Football-Data.org code for league_id={league_id}")
@@ -156,7 +165,7 @@ async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int 
     except Exception as e:
         logger.warning("FD fetch failed (%s): %s", code, e)
 
-    await asyncio.sleep(7.0)  # FD free tier: 10 calls/min → 6s min between calls
+    await asyncio.sleep(sleep_sec)  # FD free tier: 10 calls/min → 6s min between calls
 
     try:
         standings_data = await _fd_request(f"/competitions/{code}/standings")
@@ -181,7 +190,7 @@ async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int 
     except Exception as e:
         logger.warning("FD standings failed (%s): %s", code, e)
 
-    await asyncio.sleep(7.0)  # FD free tier: 10 calls/min → 6s min between calls
+    await asyncio.sleep(sleep_sec)
 
     sd.scorers = await fetch_competition_scorers(code)
 
@@ -191,11 +200,14 @@ async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int 
 async def collect_sports_data_fd(
     league_ids: list[int] | None = None,
     days_ahead: int = 7,
+    sleep_sec: float = 7.0,
 ) -> list[SportsData]:
     """Collect sports data from Football-Data.org for all configured leagues.
 
     Only attempts leagues that have a known Football-Data.org competition code.
     Returns list[SportsData] in the same format as API-Football path.
+
+    sleep_sec: passed through to fetch_league_data. Use 1.0 in debug contexts.
     """
     from app.sports_scraper import _get_league_ids
     ids = league_ids or _get_league_ids()
@@ -208,11 +220,11 @@ async def collect_sports_data_fd(
     results: list[SportsData] = []
     for lid in supported:
         try:
-            sd = await fetch_league_data(lid, days_ahead=days_ahead)
+            sd = await fetch_league_data(lid, days_ahead=days_ahead, sleep_sec=sleep_sec)
             results.append(sd)
         except Exception as e:
             logger.warning("FD league %d skipped: %s", lid, e)
-        await asyncio.sleep(1.0)  # 10 calls/min rate limit
+        await asyncio.sleep(max(1.0, sleep_sec))
 
     logger.info("Football-Data.org collected: %d leagues", len(results))
     return results

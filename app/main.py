@@ -733,9 +733,10 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
 
     diag: dict = {
         "football_data_key_set": bool(settings.football_data_api_key),
+        "odds_api_key_set": bool(settings.odds_api_key),
     }
     try:
-        # Phase 1: collect
+        # Phase 1: collect — use fast sleep (1s) for debug to avoid HTTP timeout
         from app.sports_scraper import collect_sports_data
         sports_data = []
         try:
@@ -747,11 +748,11 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
         diag["apifootball_has_data"] = has_data
         diag["apifootball_leagues"] = len(sports_data)
 
-        # FD fallback
+        # FD fallback — sleep_sec=1.0 keeps debug endpoint within HTTP timeout
         if not has_data and settings.football_data_api_key:
             from app.football_data_client import collect_sports_data_fd
             try:
-                sports_data = await collect_sports_data_fd()
+                sports_data = await collect_sports_data_fd(sleep_sec=1.0)
                 diag["fd_leagues"] = len(sports_data)
                 diag["fd_upcoming"] = sum(len(sd.upcoming) for sd in sports_data)
                 diag["fd_results"] = sum(len(sd.recent_results) for sd in sports_data)
@@ -762,21 +763,35 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
         else:
             diag["source"] = "apifootball" if has_data else "none"
 
-        # Phase 2: AI generation
+        # Phase 2: AI generation (include odds if key available)
         active = [sd for sd in sports_data if sd.upcoming or sd.recent_results]
         diag["active_leagues"] = len(active)
         posts = []
         if active:
             from app.sports_content_generator import generate_daily_sports_content
+            from app.odds_fetcher import LEAGUE_SPORT_KEY, fetch_odds_for_league
             cta_url = settings.affiliate_url or settings.vip_url or ""
+            odds_by_league: dict = {}
+            if settings.odds_api_key:
+                for sd in active[:3]:
+                    if sd.league_id in LEAGUE_SPORT_KEY:
+                        try:
+                            league_odds = await fetch_odds_for_league(sd.league_id)
+                            if league_odds:
+                                odds_by_league[sd.league_id] = league_odds
+                                diag.setdefault("odds_leagues", []).append(sd.league_id)
+                        except Exception as e:
+                            logger.warning("Odds fetch failed for %d: %s", sd.league_id, e)
             try:
-                posts = await generate_daily_sports_content(active, max_posts=2, cta_url=cta_url)
+                posts = await generate_daily_sports_content(
+                    active, max_posts=2, cta_url=cta_url, odds_by_league=odds_by_league,
+                )
                 diag["posts_generated"] = len(posts)
                 diag["post_meta"] = [
                     {"source": p.get("source"), "match_id": p.get("match_id"), "type": p.get("content_type")}
                     for p in posts[:5]
                 ]
-                diag["post_preview"] = [p["text"][:200] for p in posts[:2]]
+                diag["post_preview"] = [p["text"] for p in posts[:2]]  # full text, not truncated
             except Exception as e:
                 diag["ai_error"] = str(e)
 
