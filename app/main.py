@@ -825,6 +825,20 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
 
         # Phase 4: post if requested (flush pending queue regardless of new saves)
         if post:
+            # Probe: direct send_message to surface Telegram errors
+            from telegram import Bot
+            probe_token = settings.subscribe_bot_token
+            probe_ch = settings.channel_id
+            diag["probe_token_set"] = bool(probe_token)
+            diag["probe_channel"] = probe_ch[:8] + "..." if probe_ch else ""
+            if probe_token and probe_ch and posts:
+                try:
+                    bot = Bot(token=probe_token)
+                    sample_text = posts[0]["text"][:300]
+                    await bot.send_message(chat_id=probe_ch, text=sample_text, parse_mode="HTML")
+                    diag["probe_result"] = "ok"
+                except Exception as probe_err:
+                    diag["probe_result"] = f"error: {probe_err}"
             from scripts.sports_pipeline import run_sports_post
             ch, grp = await run_sports_post()
             diag["channel_posted"] = ch
