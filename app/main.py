@@ -704,6 +704,46 @@ async def debug_sports_test(request: Request, league_id: int = 0):
     return result
 
 
+@app.get("/debug/sports-raw")
+async def debug_sports_raw(request: Request, league_id: int = 292, season: int = 0):
+    """Raw API-Football fixture call — shows exact response for debugging."""
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    import httpx
+    from datetime import datetime, timedelta, timezone as tz
+    from app.sports_scraper import API_FOOTBALL_BASE, _get_season_year
+    api_key = settings.sports_api_key
+    if not api_key:
+        return {"error": "SPORTS_API_KEY not set"}
+    s = season or _get_season_year(league_id)
+    today = datetime.now(tz.utc).strftime("%Y-%m-%d")
+    end = (datetime.now(tz.utc) + timedelta(days=14)).strftime("%Y-%m-%d")
+    headers = {"x-apisports-key": api_key, "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{API_FOOTBALL_BASE}/fixtures",
+                headers=headers,
+                params={"league": league_id, "season": s, "from": today, "to": end, "timezone": "Asia/Seoul"},
+            )
+        data = resp.json()
+        return {
+            "league_id": league_id,
+            "season": s,
+            "date_range": f"{today} to {end}",
+            "http_status": resp.status_code,
+            "quota_remaining": resp.headers.get("x-ratelimit-requests-remaining", "?"),
+            "results_count": data.get("results", 0),
+            "errors": data.get("errors"),
+            "fixtures_preview": [
+                f"{f['teams']['home']['name']} vs {f['teams']['away']['name']} — {f['fixture']['date']}"
+                for f in data.get("response", [])[:5]
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/debug/api-quota")
 async def debug_api_quota(request: Request):
     """API-Football 쿼터 및 계정 상태 조회 (단일 경량 호출)."""
