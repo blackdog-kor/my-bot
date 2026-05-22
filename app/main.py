@@ -767,26 +767,51 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
             try:
                 posts = await generate_daily_sports_content(active, max_posts=2, cta_url=cta_url)
                 diag["posts_generated"] = len(posts)
+                diag["post_meta"] = [
+                    {"source": p.get("source"), "match_id": p.get("match_id"), "type": p.get("content_type")}
+                    for p in posts[:5]
+                ]
                 diag["post_preview"] = [p["text"][:200] for p in posts[:2]]
             except Exception as e:
                 diag["ai_error"] = str(e)
 
         # Phase 3: DB save
-        from app.pg_broadcast import ensure_channel_content_table, is_content_duplicate, save_channel_content
+        from app.pg_broadcast import (
+            ensure_channel_content_table, is_content_duplicate,
+            save_channel_content, _get_conn,
+        )
         ensure_channel_content_table()
+        # Show existing sports records for context
+        try:
+            with _get_conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(*), COUNT(*) FILTER (WHERE status='pending') "
+                    "FROM channel_content WHERE source_channel LIKE 'api:sports:%'"
+                )
+                row = cur.fetchone()
+                diag["existing_sports_total"] = row[0] if row else 0
+                diag["existing_sports_pending"] = row[1] if row else 0
+                cur.close()
+        except Exception:
+            pass
         saved = 0
+        skipped_dup = 0
         for p in posts:
             src = p.get("source", "sports")
             mid = p.get("match_id", 0)
-            if not is_content_duplicate(src, mid):
-                cid = save_channel_content(
-                    original_text=p["text"], rewritten_text=p["text"],
-                    media_type=p.get("media_type", "photo"),
-                    source_channel=src, source_msg_id=mid, source_views=0,
-                    image_url=p.get("image_url"),
-                )
-                if cid:
-                    saved += 1
+            if is_content_duplicate(src, mid):
+                skipped_dup += 1
+                continue
+            cid = save_channel_content(
+                original_text=p["text"], rewritten_text=p["text"],
+                media_type=p.get("media_type", "photo"),
+                source_channel=src, source_msg_id=mid, source_views=0,
+                image_url=p.get("image_url"),
+            )
+            if cid:
+                saved += 1
+        diag["skipped_duplicates"] = skipped_dup
         diag["saved_to_db"] = saved
 
         # Phase 4: post if requested
