@@ -184,6 +184,24 @@ async def _api_request(
     return data
 
 
+# Leagues whose season number equals the calendar year (Asian leagues).
+# All others (PL, La Liga, etc.) start in Aug and are named by start year.
+_SAME_YEAR_LEAGUES: frozenset[int] = frozenset({292, 848})  # K League 1, AFC CL
+
+
+def _get_season_year(league_id: int) -> int:
+    """Return the correct API-Football season year for a given league.
+
+    European leagues name their season by start year (2025/26 = season 2025).
+    Jan-Jul we are still in the previous start-year's season, so subtract 1.
+    Asian leagues (K League, AFC CL) use the full calendar year directly.
+    """
+    now = datetime.now(timezone.utc)
+    if league_id in _SAME_YEAR_LEAGUES:
+        return now.year
+    return now.year if now.month >= 8 else now.year - 1
+
+
 async def fetch_upcoming_matches(
     league_id: int,
     days_ahead: int = 7,
@@ -201,7 +219,7 @@ async def fetch_upcoming_matches(
     end = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).strftime(
         "%Y-%m-%d"
     )
-    season = datetime.now(timezone.utc).year
+    season = _get_season_year(league_id)
 
     try:
         data = await _api_request(
@@ -267,7 +285,7 @@ async def fetch_recent_results(
     start = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime(
         "%Y-%m-%d"
     )
-    season = datetime.now(timezone.utc).year
+    season = _get_season_year(league_id)
 
     try:
         data = await _api_request(
@@ -322,7 +340,7 @@ async def fetch_recent_results(
 
 async def fetch_standings(league_id: int) -> list[TeamStanding]:
     """Fetch current league standings."""
-    season = datetime.now(timezone.utc).year
+    season = _get_season_year(league_id)
 
     try:
         data = await _api_request(

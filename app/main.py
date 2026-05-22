@@ -676,7 +676,7 @@ async def debug_sports_test(request: Request, league_id: int = 0):
                 )
 
                 posts = await generate_daily_sports_content(
-                    sports_data, max_posts=2, cta_text="👉 테스트 CTA",
+                    sports_data, max_posts=2, cta_url=settings.affiliate_url or settings.vip_url or "",
                 )
                 result["generated_posts"] = [
                     {"type": p["content_type"], "text": p["text"][:500]}
