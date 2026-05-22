@@ -719,6 +719,33 @@ async def debug_sports_test(request: Request, league_id: int = 0):
     return result
 
 
+@app.get("/debug/run-sports-pipeline")
+async def debug_run_sports_pipeline(request: Request, post: bool = False):
+    """실제 스포츠 파이프라인 수동 실행 (스케줄러와 동일한 경로).
+
+    post=false: 수집 + AI 생성 + DB 저장만 (채널/그룹 게시 안 함)
+    post=true: 수집 + 생성 + DB 저장 + 채널/그룹 실제 게시
+    """
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.sports_pipeline import run_sports_collect_and_generate, run_sports_post
+        saved = await run_sports_collect_and_generate()
+        result = {"saved_to_db": saved}
+        if post and saved > 0:
+            ch_posted, grp_posted = await run_sports_post()
+            result["channel_posted"] = ch_posted
+            result["group_posted"] = grp_posted
+        result["status"] = "ok"
+        return result
+    except Exception as e:
+        logger.exception("run-sports-pipeline 실패: %s", e)
+        return {"status": "error", "error": str(e)}
+
+
 @app.get("/debug/fd-test")
 async def debug_fd_test(request: Request, league_id: int = 39):
     """Football-Data.org 직접 테스트 (현재 시즌 데이터 확인).
