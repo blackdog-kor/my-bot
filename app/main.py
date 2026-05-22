@@ -728,7 +728,7 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
     if not _check_debug_auth(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-    diag: dict = {"football_data_key_set": bool(settings.football_data_api_key)}
+    diag: dict = {"v": "e5fab1f", "football_data_key_set": bool(settings.football_data_api_key)}
     try:
         # Phase 1: collect
         from app.sports_scraper import collect_sports_data
