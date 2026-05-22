@@ -39,6 +39,13 @@
 - [x] **포럼 토픽에 "⚽ 스포츠 분석" 추가** (`group_topic_manager`)
 - [x] **`/debug/sports-test` 엔드포인트 추가** (스포츠 파이프라인 수동 테스트)
 - [x] **스케줄러에 스포츠 파이프라인 Job 등록** (04:00 + 10:00 UTC)
+- [x] **Football-Data.org 폴백 클라이언트 구현** (`app/football_data_client.py`)
+- [x] **FOOTBALL_DATA_API_KEY Railway 등록** (3d53b2201e3146a7b6d62b7318c6c9d0)
+- [x] **실시간 매치 스케줄러 시스템 구축** (match_schedule_db, match_scheduler, match_schedule_runner, 30분 job)
+- [x] **`get_pending_channel_content` source_prefix 파라미터** (큐 선점 버그 수정)
+- [x] **스포츠 콘텐츠 채널+그룹 게시 end-to-end 검증** (channel_posted=2, group_posted=2)
+- [ ] **Railway 대시보드에서 `SPORTS_LEAGUES=1,292,98,253,71` 업데이트** (현재 구형 유럽 리그로 설정됨)
+- [ ] **Railway account-level 토큰 발급** (Account Settings → Tokens) — CLI 자동화용
 - [ ] `.playwright-mcp/` 정리 (gitignore 또는 커밋 결정)
 - [ ] **`CHANNEL_ID` 환경변수 설정** (게시 대상 채널 — 콘텐츠 시스템 가동 필수)
 - [ ] **`SPORTS_API_KEY` Railway 환경변수 설정** (api-sports.io 무료 가입)

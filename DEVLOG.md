@@ -5,6 +5,49 @@
 
 ---
 
+## 2026-05-22 | 스포츠 콘텐츠 채널/그룹 게시 버그 수정 + Football-Data.org 폴백 완성
+
+### 💡 결정 사항
+- **API-Football 무료 플랜 한계 확인**: 2025/26 시즌 데이터 없음 → Football-Data.org 무료 API 폴백 도입
+  - Football-Data.org API키 `3d53b2201e3146a7b6d62b7318c6c9d0` Railway에 등록 완료
+  - `app/football_data_client.py` 신규 구현 (Premier League 등 현재 시즌 데이터 정상 수집)
+- **스포츠 리그 변경**: 유럽 리그 5월 시즌 종료 → `SPORTS_LEAGUES=1,292,98,253,71` (월드컵·K리그·J리그·MLS·브라질)
+- **실시간 매치 스케줄러 시스템 완성**: `match_schedule_db.py`, `match_scheduler.py`, `match_schedule_runner.py`, scheduler.py 30분 interval job
+- **`source_prefix` 쿼리 도입**: `get_pending_channel_content(source_prefix="api:sports:")` — 큐 순서 문제 근본 해결
+
+### 🐛 버그 체인 (모두 수정 완료)
+1. **시즌 연도 계산 오류**: `season=2026` 사용 → `_get_season_year()` + `_CROSS_YEAR_LEAGUES` 로직으로 수정
+2. **`source_channel` SELECT 누락**: `get_pending_channel_content` SQL에 컬럼 없어서 필터 항상 False
+3. **큐 선점 문제**: `web:bigwinboard` 오래된 레코드 4개가 limit=4 슬롯 선점 → sports 레코드 조회 불가
+4. **최종 수정**: `WHERE source_channel LIKE 'api:sports:%'` 직접 쿼리
+
+### 🔧 변경 파일 목록
+- `app/football_data_client.py` — Football-Data.org 클라이언트 (신규)
+- `app/pg_broadcast.py` — `get_pending_channel_content()` source_channel 컬럼 추가 + source_prefix 파라미터
+- `app/sports_scraper.py` — `_get_season_year()`, `_CROSS_YEAR_LEAGUES`, `days_ahead` 파라미터
+- `app/channel_poster.py` — card_bytes Priority 0 경로, 10MB 캡
+- `app/match_schedule_db.py` — match_schedule 테이블 CRUD (신규)
+- `app/match_scheduler.py` — 30분 실시간 프리뷰/리뷰 게시 로직 (신규)
+- `app/match_card_generator.py` — 새 리그 색상 추가
+- `app/config.py` — match timing 설정 필드, football_data_api_key, sports_leagues 기본값
+- `scripts/match_schedule_runner.py` — subprocess entry point (신규)
+- `scripts/sports_pipeline.py` — Phase 1.5 match_schedule 업서트, FD 폴백, source_prefix 쿼리
+- `app/scheduler.py` — _job_match_scheduler 30분 interval 등록
+- `app/main.py` — /debug/run-sports-pipeline 진단 엔드포인트 개선
+
+### 📋 다음 할 일
+- Railway 대시보드에서 `SPORTS_LEAGUES=1,292,98,253,71` 수동 업데이트 (CLI 토큰 미작동)
+- 스포츠 파이프라인 자동 실행 모니터링 (6시간마다 — 04:00, 10:00 UTC)
+- 매치 스케줄러 첫 실행 확인 (30분마다 kickoff 체크)
+- FIFA 월드컵 2026 개막 (6월 12일) 대비 월드컵 리그 데이터 수집 확인
+
+### ⚠️ 주의사항
+- Railway token `f8858618-7a81-4bea-b4f8-c7b1b90f8e46`은 project-level 토큰 → CLI 인증 불가
+  - Railway CLI용 account-level 토큰 필요 (Account Settings → Tokens)
+- `web:bigwinboard` 레코드 4개가 channel_content 테이블에 pending 상태로 남아있음 (자동 게시 대기 중)
+
+---
+
 ## 2026-04-20 | 스포츠 경기 일정/분석 콘텐츠 자동화 파이프라인 구축
 
 ### 💡 결정 사항
