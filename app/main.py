@@ -704,6 +704,15 @@ async def debug_sports_test(request: Request, league_id: int = 0):
     return result
 
 
+@app.get("/debug/api-quota")
+async def debug_api_quota(request: Request):
+    """API-Football 쿼터 및 계정 상태 조회 (단일 경량 호출)."""
+    if not _check_debug_auth(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    from app.sports_scraper import check_api_quota
+    return await check_api_quota()
+
+
 @app.get("/debug/content-test")
 async def debug_content_test(request: Request, dry_run: bool = True):
     """콘텐츠 자동화 파이프라인 수동 테스트.

@@ -158,7 +158,10 @@ async def _api_request(
     endpoint: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Make authenticated request to API-Football."""
+    """Make authenticated request to API-Football.
+
+    Logs remaining daily quota from response headers so we can track usage.
+    """
     api_key = settings.sports_api_key
     if not api_key:
         raise ValueError("SPORTS_API_KEY not configured")
@@ -177,11 +180,40 @@ async def _api_request(
         resp.raise_for_status()
         data = resp.json()
 
+    remaining = resp.headers.get("x-ratelimit-requests-remaining", "?")
+    limit = resp.headers.get("x-ratelimit-requests-limit", "?")
+    logger.debug("API-Football quota: %s/%s remaining", remaining, limit)
+
     errors = data.get("errors")
     if errors and isinstance(errors, dict) and errors:
         raise ValueError(f"API-Football error: {errors}")
 
+    results_count = data.get("results", 0)
+    logger.debug("API-Football /%s → %s results (quota remaining: %s)", endpoint, results_count, remaining)
     return data
+
+
+async def check_api_quota() -> dict:
+    """Single lightweight call to check API key validity and quota."""
+    api_key = settings.sports_api_key
+    if not api_key:
+        return {"error": "SPORTS_API_KEY not set"}
+    headers = {"x-apisports-key": api_key, "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{API_FOOTBALL_BASE}/status", headers=headers)
+        data = resp.json()
+        response_data = data.get("response", {})
+        return {
+            "account_plan": response_data.get("subscription", {}).get("plan", "?"),
+            "requests_limit_day": response_data.get("requests", {}).get("limit_day", "?"),
+            "requests_current": response_data.get("requests", {}).get("current", "?"),
+            "requests_remaining": int(response_data.get("requests", {}).get("limit_day", 0) or 0) - int(response_data.get("requests", {}).get("current", 0) or 0),
+            "errors": data.get("errors"),
+            "raw": response_data,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # Leagues whose season number equals the calendar year (Asian leagues).
