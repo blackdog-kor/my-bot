@@ -814,8 +814,8 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
         diag["skipped_duplicates"] = skipped_dup
         diag["saved_to_db"] = saved
 
-        # Phase 4: post if requested
-        if post and saved > 0:
+        # Phase 4: post if requested (flush pending queue regardless of new saves)
+        if post:
             from scripts.sports_pipeline import run_sports_post
             ch, grp = await run_sports_post()
             diag["channel_posted"] = ch
