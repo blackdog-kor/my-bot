@@ -532,6 +532,9 @@ async def debug_status(request: Request):
         "db_status": db_status,
         "python": sys.executable,
         "affiliate_url": AFFILIATE_URL[:30] + "..." if len(AFFILIATE_URL) > 30 else AFFILIATE_URL,
+        "channel_id_set": bool(settings.channel_id),
+        "group_id_set": bool(settings.group_id),
+        "channel_id_preview": settings.channel_id[:6] + "..." if settings.channel_id else "",
     }
 
 
