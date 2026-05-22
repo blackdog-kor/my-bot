@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     sports_max_daily_posts: int = 4  # max sports posts per day
     sports_topic_content_type: str = "sports"  # content_type for forum topic routing
     pexels_api_key: str = ""  # Pexels API key for sports post images (free: 200 req/hr)
+    odds_api_key: str = ""   # The Odds API key for real betting odds (free: 500 req/month)
 
     # ── Optional integrations ────────────────────────────────────
     sentry_dsn: str = ""

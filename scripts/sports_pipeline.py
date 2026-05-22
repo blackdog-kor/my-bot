@@ -75,6 +75,23 @@ async def run_sports_collect_and_generate() -> int:
 
     cta_url = settings.affiliate_url or settings.vip_url or ""
 
+    # ── Fetch odds for all active leagues ──
+    from app.odds_fetcher import fetch_odds_for_league, LEAGUE_SPORT_KEY
+    from app.pick_tracker import ensure_pick_history_table, format_accuracy_line
+
+    ensure_pick_history_table()
+    accuracy_line = format_accuracy_line()
+
+    odds_by_league: dict[int, list] = {}
+    if settings.odds_api_key:
+        active_ids = [sd.league_id for sd in sports_data if sd.league_id in LEAGUE_SPORT_KEY]
+        for lid in active_ids[:4]:  # limit to 4 leagues to preserve free quota
+            league_odds = await fetch_odds_for_league(lid)
+            if league_odds:
+                odds_by_league[lid] = league_odds
+                logger.info("배당 수집: league_id=%d → %d건", lid, len(league_odds))
+            await asyncio.sleep(0.5)
+
     posts: list[dict] = []
 
     if sports_data:
@@ -82,6 +99,8 @@ async def run_sports_collect_and_generate() -> int:
             sports_data,
             max_posts=settings.sports_max_daily_posts,
             cta_url=cta_url,
+            odds_by_league=odds_by_league,
+            accuracy_line=accuracy_line,
         )
 
     if not posts:
@@ -151,7 +170,13 @@ async def run_sports_post() -> tuple[int, int]:
             continue
 
         if settings.channel_id:
-            success = await post_to_channel({"text": text, "media_type": "text"})
+            success = await post_to_channel({
+                "text": text,
+                "media_type": "photo",
+                "image_url": item.get("image_url"),
+                "affiliate_url": item.get("affiliate_url"),
+                "button_text": item.get("button_text", "🎰 스포츠 베팅하기"),
+            })
             if success:
                 mark_content_posted(item["id"])
                 ch_posted += 1

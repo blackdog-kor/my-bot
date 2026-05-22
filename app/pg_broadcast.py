@@ -888,6 +888,7 @@ def ensure_channel_content_table() -> None:
                 "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS group_posted BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS group_posted_at TIMESTAMPTZ",
                 "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS image_url TEXT",
+                "ALTER TABLE channel_content ADD COLUMN IF NOT EXISTS match_id INTEGER",
             ]:
                 cur.execute(col_ddl)
             conn.commit()
