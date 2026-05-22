@@ -645,44 +645,59 @@ async def debug_sports_test(request: Request, league_id: int = 0):
         return result
 
     try:
+        sports_data = []
+        # Try API-Football first
         if settings.sports_api_key:
             target = league_id if league_id else None
-            sports_data = await collect_sports_data(target)
-            result["mode"] = "api"
-            result["leagues_collected"] = len(sports_data)
-            result["data_summary"] = [
-                {
-                    "league": sd.league_name,
-                    "league_id": sd.league_id,
-                    "upcoming_matches": len(sd.upcoming),
-                    "recent_results": len(sd.recent_results),
-                    "standings_teams": len(sd.standings),
-                    "upcoming_sample": [
-                        f"{m.home_team} vs {m.away_team} ({m.match_date})"
-                        for m in sd.upcoming[:3]
-                    ],
-                    "results_sample": [
-                        f"{m.home_team} {m.home_score}-{m.away_score} {m.away_team}"
-                        for m in sd.recent_results[:3]
-                    ],
-                }
-                for sd in sports_data
+            try:
+                sports_data = await collect_sports_data(target)
+            except Exception:
+                pass
+
+        has_data = any(sd.upcoming or sd.recent_results for sd in sports_data)
+
+        # Fallback: Football-Data.org (free, current season)
+        if not has_data and settings.football_data_api_key:
+            from app.football_data_client import collect_sports_data_fd
+            lids = [league_id] if league_id else None
+            sports_data = await collect_sports_data_fd(league_ids=lids)
+            result["mode"] = "football_data_org"
+        else:
+            result["mode"] = "api_football" if sports_data else "none"
+
+        result["leagues_collected"] = len(sports_data)
+        result["data_summary"] = [
+            {
+                "league": sd.league_name,
+                "league_id": sd.league_id,
+                "upcoming_matches": len(sd.upcoming),
+                "recent_results": len(sd.recent_results),
+                "standings_teams": len(sd.standings),
+                "upcoming_sample": [
+                    f"{m.home_team} vs {m.away_team} ({m.match_date})"
+                    for m in sd.upcoming[:3]
+                ],
+                "results_sample": [
+                    f"{m.home_team} {m.home_score}-{m.away_score} {m.away_team}"
+                    for m in sd.recent_results[:3]
+                ],
+            }
+            for sd in sports_data
+        ]
+
+        # Generate sample content if AI is available and data exists
+        active_data = [sd for sd in sports_data if sd.upcoming or sd.recent_results]
+        if has_ai and active_data:
+            from app.sports_content_generator import generate_daily_sports_content
+            posts = await generate_daily_sports_content(
+                active_data, max_posts=2, cta_url=settings.affiliate_url or settings.vip_url or "",
+            )
+            result["generated_posts"] = [
+                {"type": p["content_type"], "text": p["text"][:500]}
+                for p in posts
             ]
 
-            # Generate sample content if AI is available
-            if has_ai and sports_data:
-                from app.sports_content_generator import (
-                    generate_daily_sports_content,
-                )
-
-                posts = await generate_daily_sports_content(
-                    sports_data, max_posts=2, cta_url=settings.affiliate_url or settings.vip_url or "",
-                )
-                result["generated_posts"] = [
-                    {"type": p["content_type"], "text": p["text"][:500]}
-                    for p in posts
-                ]
-        else:
+        if not sports_data:
             web_data = await collect_sports_data_web_fallback()
             result["mode"] = "web_fallback"
             result["web_articles"] = len(web_data)
