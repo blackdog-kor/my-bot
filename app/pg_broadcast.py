@@ -955,20 +955,38 @@ def is_content_duplicate(source_channel: str, source_msg_id: int, days: int = 7)
         return False
 
 
-def get_pending_channel_content(limit: int = 5) -> list[dict]:
-    """게시 대기 중인 콘텐츠 반환 (status='pending')."""
+def get_pending_channel_content(
+    limit: int = 5,
+    source_prefix: str | None = None,
+) -> list[dict]:
+    """Return pending channel_content records.
+
+    source_prefix: if given, filter WHERE source_channel LIKE '<prefix>%'
+    """
     try:
         with _get_conn() as conn:
             cur = conn.cursor()
-            cur.execute("""
-                SELECT id, original_text, rewritten_text, media_type,
-                       file_id, affiliate_url, button_text, image_url,
-                       source_channel
-                FROM channel_content
-                WHERE status = 'pending'
-                ORDER BY created_at ASC
-                LIMIT %s
-            """, (limit,))
+            if source_prefix:
+                cur.execute("""
+                    SELECT id, original_text, rewritten_text, media_type,
+                           file_id, affiliate_url, button_text, image_url,
+                           source_channel
+                    FROM channel_content
+                    WHERE status = 'pending'
+                      AND source_channel LIKE %s
+                    ORDER BY created_at ASC
+                    LIMIT %s
+                """, (source_prefix + "%", limit))
+            else:
+                cur.execute("""
+                    SELECT id, original_text, rewritten_text, media_type,
+                           file_id, affiliate_url, button_text, image_url,
+                           source_channel
+                    FROM channel_content
+                    WHERE status = 'pending'
+                    ORDER BY created_at ASC
+                    LIMIT %s
+                """, (limit,))
             rows = cur.fetchall()
             cur.close()
             return [

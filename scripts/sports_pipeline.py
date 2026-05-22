@@ -204,8 +204,11 @@ async def run_sports_post() -> tuple[int, int]:
 
     logger.info("=== 스포츠 콘텐츠 게시 시작 ===")
 
-    pending = get_pending_channel_content(limit=settings.sports_max_daily_posts)
-    sports_pending = [p for p in pending if "sports" in (p.get("source_channel") or "")]
+    pending = get_pending_channel_content(
+        limit=settings.sports_max_daily_posts,
+        source_prefix="api:sports:",
+    )
+    sports_pending = pending  # already filtered by source_prefix
 
     if not sports_pending:
         logger.info("게시 대기 스포츠 콘텐츠 없음")

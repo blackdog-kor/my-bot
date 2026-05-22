@@ -842,11 +842,13 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
             # Inline sports post attempt to surface errors
             from app.pg_broadcast import get_pending_channel_content, mark_content_posted
             from app.channel_poster import post_to_channel
-            pending_items = get_pending_channel_content(limit=settings.sports_max_daily_posts)
-            all_src = [p.get("source_channel", "<none>") for p in pending_items]
-            sports_items = [p for p in pending_items if "sports" in (p.get("source_channel") or "")]
+            pending_items = get_pending_channel_content(
+                limit=settings.sports_max_daily_posts,
+                source_prefix="api:sports:",
+            )
             diag["pending_total"] = len(pending_items)
-            diag["pending_sources"] = all_src[:4]
+            diag["pending_sources"] = [p.get("source_channel", "<none>") for p in pending_items[:4]]
+            sports_items = pending_items
             diag["sports_items"] = len(sports_items)
             ch = 0
             post_errors = []
