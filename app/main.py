@@ -732,11 +732,7 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     diag: dict = {
-        "v": "6b992d0",
         "football_data_key_set": bool(settings.football_data_api_key),
-        "channel_id_set": bool(settings.channel_id),
-        "group_id_set": bool(settings.group_id),
-        "subscribe_bot_token_set": bool(settings.subscribe_bot_token),
     }
     try:
         # Phase 1: collect
@@ -825,59 +821,10 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
 
         # Phase 4: post if requested (flush pending queue regardless of new saves)
         if post:
-            # Probe: direct send_message to surface Telegram errors
-            from telegram import Bot
-            probe_token = settings.subscribe_bot_token
-            probe_ch = settings.channel_id
-            diag["probe_token_set"] = bool(probe_token)
-            diag["probe_channel"] = probe_ch[:8] + "..." if probe_ch else ""
-            if probe_token and probe_ch and posts:
-                try:
-                    bot = Bot(token=probe_token)
-                    sample_text = posts[0]["text"][:300]
-                    await bot.send_message(chat_id=probe_ch, text=sample_text, parse_mode="HTML")
-                    diag["probe_result"] = "ok"
-                except Exception as probe_err:
-                    diag["probe_result"] = f"error: {probe_err}"
-            # Inline sports post attempt to surface errors
-            from app.pg_broadcast import get_pending_channel_content, mark_content_posted
-            from app.channel_poster import post_to_channel
-            pending_items = get_pending_channel_content(
-                limit=settings.sports_max_daily_posts,
-                source_prefix="api:sports:",
-            )
-            diag["pending_total"] = len(pending_items)
-            diag["pending_sources"] = [p.get("source_channel", "<none>") for p in pending_items[:4]]
-            sports_items = pending_items
-            diag["sports_items"] = len(sports_items)
-            ch = 0
-            post_errors = []
-            for item in sports_items[:2]:  # limit to 2 for safety
-                text = item.get("rewritten_text") or item.get("original_text", "")
-                if not text.strip():
-                    continue
-                try:
-                    ok = await post_to_channel({"text": text, "media_type": "photo"})
-                    if ok:
-                        mark_content_posted(item["id"])
-                        ch += 1
-                    else:
-                        post_errors.append(f"id={item['id']}: returned False")
-                except Exception as pe:
-                    post_errors.append(f"id={item['id']}: {pe}")
+            from scripts.sports_pipeline import run_sports_post
+            ch, grp = await run_sports_post()
             diag["channel_posted"] = ch
-            diag["post_errors"] = post_errors
-            # group posting if channel succeeded
-            if ch > 0 and settings.group_id:
-                try:
-                    from app.group_topic_manager import post_channel_content_to_topics
-                    grp = await post_channel_content_to_topics(limit=ch)
-                    diag["group_posted"] = grp
-                except Exception as ge:
-                    diag["group_error"] = str(ge)
-                    diag["group_posted"] = 0
-            else:
-                diag["group_posted"] = 0
+            diag["group_posted"] = grp
 
         diag["status"] = "ok"
     except Exception as e:
