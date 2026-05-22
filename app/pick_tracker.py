@@ -43,6 +43,8 @@ def ensure_pick_history_table() -> None:
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_pick_history_match_id ON pick_history (match_id)")
+            # Unique constraint so ON CONFLICT DO NOTHING actually deduplicates by match_id
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pick_history_unique_match ON pick_history (match_id)")
             conn.commit()
             cur.close()
             logger.info("pick_history table ready")

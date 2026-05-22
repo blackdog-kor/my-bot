@@ -56,13 +56,18 @@ def _fmt_standings(standings: list[TeamStanding], league_name: str) -> str:
 
 
 def _extract_pick(text: str) -> tuple[str, int, int]:
-    """Heuristically extract pick/stars/confidence from AI-generated text."""
+    """Heuristically extract pick/stars/confidence from AI-generated text.
+
+    Returns pick as English ("home"/"draw"/"away") to match pick_tracker DB constants.
+    """
     if "원정승" in text:
-        pick = "원정승"
+        pick = "away"
     elif "무승부" in text:
-        pick = "무승부"
+        pick = "draw"
     else:
-        pick = "홈승"
+        if "홈승" not in text:
+            logger.debug("No explicit pick found in AI text — defaulting to home")
+        pick = "home"
     stars, confidence = 3, 72
     for s in range(5, 0, -1):
         if "⭐" * s in text:
@@ -105,6 +110,8 @@ async def generate_match_preview(
             standings=sd.standings,
             scorers=getattr(sd, "scorers", None),
         )
+    else:
+        logger.warning("No SportsData passed for %s vs %s — real data context omitted", match.home_team, match.away_team)
 
     user_prompt = (
         f"Generate a match preview for:\n\n{_fmt_match(match, odds_section)}\n\n"

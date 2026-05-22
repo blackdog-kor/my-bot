@@ -156,11 +156,13 @@ async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int 
     except Exception as e:
         logger.warning("FD fetch failed (%s): %s", code, e)
 
+    await asyncio.sleep(7.0)  # FD free tier: 10 calls/min → 6s min between calls
+
     try:
         standings_data = await _fd_request(f"/competitions/{code}/standings")
         for table in standings_data.get("standings", []):
             if table.get("type") == "TOTAL":
-                for row in table.get("table", [])[:10]:
+                for row in table.get("table", [])[:20]:  # all 20 PL teams, not just top 10
                     team = row.get("team", {})
                     sd.standings.append(TeamStanding(
                         team_name=team.get("name", ""),
@@ -178,6 +180,8 @@ async def fetch_league_data(league_id: int, days_ahead: int = 7, days_back: int 
                 break
     except Exception as e:
         logger.warning("FD standings failed (%s): %s", code, e)
+
+    await asyncio.sleep(7.0)  # FD free tier: 10 calls/min → 6s min between calls
 
     sd.scorers = await fetch_competition_scorers(code)
 

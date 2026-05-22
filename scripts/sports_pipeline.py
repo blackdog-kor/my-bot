@@ -79,14 +79,17 @@ async def run_sports_collect_and_generate() -> int:
             except Exception as e:
                 logger.warning("웹 폴백도 실패: %s", e)
 
-    # ── Phase 1.5: Populate match_schedule for real-time 30-min job ──
+    # ── Phase 1.5: Populate match_schedule + fetch odds (shared cache) ──
+    # odds_cache is built here and reused in Phase 2 to avoid double API calls
+    from app.odds_fetcher import LEAGUE_SPORT_KEY, fetch_odds_for_league
+    odds_cache: dict[int, list] = {}
+
     if sports_data:
         try:
             from app.match_schedule_db import ensure_match_schedule_table, upsert_match
-            from app.odds_fetcher import LEAGUE_SPORT_KEY, fetch_odds_for_league, match_odds_to_game
+            from app.odds_fetcher import match_odds_to_game
 
             ensure_match_schedule_table()
-            odds_cache: dict[int, list] = {}
             upserted = 0
             for sd in sports_data:
                 if settings.odds_api_key and sd.league_id in LEAGUE_SPORT_KEY and sd.league_id not in odds_cache:
@@ -106,40 +109,37 @@ async def run_sports_collect_and_generate() -> int:
                             "over_2_5": odds.over_2_5, "under_2_5": odds.under_2_5,
                             "btts_yes": odds.btts_yes, "btts_no": odds.btts_no,
                         }
-                    ok = upsert_match(
+                    if upsert_match(
                         match_id=match.match_id, league_id=sd.league_id,
                         home_team=match.home_team, away_team=match.away_team,
                         kickoff_utc=match.match_date, league_name=match.league_name,
                         venue=match.venue or "", round_name=match.round_name or "",
                         odds_dict=odds_dict,
-                    )
-                    if ok:
+                    ):
                         upserted += 1
             logger.info("match_schedule 업서트 완료: %d건", upserted)
         except Exception as e:
             logger.warning("match_schedule 업서트 실패: %s", e)
 
-    # ── Phase 2: AI content generation ──
+    # ── Phase 2: AI content generation (reuse odds_cache from Phase 1.5) ──
     logger.info("=== AI 스포츠 콘텐츠 생성 시작 ===")
 
     cta_url = settings.affiliate_url or settings.vip_url or ""
 
-    # ── Fetch odds for all active leagues ──
-    from app.odds_fetcher import fetch_odds_for_league, LEAGUE_SPORT_KEY
     from app.pick_tracker import ensure_pick_history_table, format_accuracy_line
-
     ensure_pick_history_table()
     accuracy_line = format_accuracy_line()
 
-    odds_by_league: dict[int, list] = {}
-    if settings.odds_api_key:
+    # Fill odds for any leagues not yet fetched during Phase 1.5
+    if settings.odds_api_key and sports_data:
         active_ids = [sd.league_id for sd in sports_data if sd.league_id in LEAGUE_SPORT_KEY]
-        for lid in active_ids[:4]:  # limit to 4 leagues to preserve free quota
-            league_odds = await fetch_odds_for_league(lid)
-            if league_odds:
-                odds_by_league[lid] = league_odds
-                logger.info("배당 수집: league_id=%d → %d건", lid, len(league_odds))
-            await asyncio.sleep(0.5)
+        for lid in active_ids[:4]:
+            if lid not in odds_cache:
+                league_odds = await fetch_odds_for_league(lid)
+                if league_odds:
+                    odds_cache[lid] = league_odds
+                    logger.info("배당 수집(2차): league_id=%d → %d건", lid, len(league_odds))
+                await asyncio.sleep(0.5)
 
     posts: list[dict] = []
 
@@ -148,7 +148,7 @@ async def run_sports_collect_and_generate() -> int:
             sports_data,
             max_posts=settings.sports_max_daily_posts,
             cta_url=cta_url,
-            odds_by_league=odds_by_league,
+            odds_by_league=odds_cache,
             accuracy_line=accuracy_line,
         )
 
