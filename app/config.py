@@ -79,8 +79,9 @@ class Settings(BaseSettings):
     sports_post_interval_hours: int = 6  # hours between sports posts
     sports_max_daily_posts: int = 4  # max sports posts per day
     sports_topic_content_type: str = "sports"  # content_type for forum topic routing
-    pexels_api_key: str = ""  # Pexels API key for sports post images (free: 200 req/hr)
-    odds_api_key: str = ""   # The Odds API key for real betting odds (free: 500 req/month)
+    pexels_api_key: str = ""          # Pexels API key for sports post images (free: 200 req/hr)
+    odds_api_key: str = ""            # The Odds API key for real betting odds (free: 500 req/month)
+    football_data_api_key: str = ""   # api.football-data.org free key (current season, 10 comp)
 
     # ── Match Scheduler (real-time 30-min job) ────────────────────
     match_preview_hours_before: int = 3   # post preview this many hours before kickoff

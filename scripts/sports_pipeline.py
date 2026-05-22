@@ -50,25 +50,34 @@ async def run_sports_collect_and_generate() -> int:
     ensure_channel_content_table()
 
     # ── Phase 1: Data collection ──
+    # Priority: API-Football (if key + data) → Football-Data.org → web fallback
     sports_data = []
     if settings.sports_api_key:
         logger.info("=== API-Football 데이터 수집 시작 ===")
         try:
             sports_data = await collect_sports_data(days_ahead=settings.match_schedule_days_ahead)
-            total = sum(
-                len(sd.upcoming) + len(sd.recent_results)
-                for sd in sports_data
-            )
+            total = sum(len(sd.upcoming) + len(sd.recent_results) for sd in sports_data)
             logger.info("API 수집 완료: %d개 리그, %d건 경기 데이터", len(sports_data), total)
         except Exception as e:
-            logger.warning("API 수집 실패: %s", e)
-    else:
-        logger.info("SPORTS_API_KEY 미설정 — 웹 폴백")
-        try:
-            web_data = await collect_sports_data_web_fallback()
-            logger.info("웹 폴백 수집: %d건", len(web_data))
-        except Exception as e:
-            logger.warning("웹 폴백도 실패: %s", e)
+            logger.warning("API-Football 수집 실패: %s", e)
+
+    # Fallback: Football-Data.org (free, current season) when API-Football yields nothing
+    if not any(sd.upcoming or sd.recent_results for sd in sports_data):
+        if settings.football_data_api_key:
+            logger.info("=== Football-Data.org 폴백 시작 ===")
+            try:
+                from app.football_data_client import collect_sports_data_fd
+                sports_data = await collect_sports_data_fd(days_ahead=settings.match_schedule_days_ahead)
+                total = sum(len(sd.upcoming) + len(sd.recent_results) for sd in sports_data)
+                logger.info("Football-Data.org 수집 완료: %d개 리그, %d건", len(sports_data), total)
+            except Exception as e:
+                logger.warning("Football-Data.org 수집 실패: %s", e)
+        else:
+            logger.info("FOOTBALL_DATA_API_KEY 미설정 — 웹 스크래핑 폴백")
+            try:
+                await collect_sports_data_web_fallback()
+            except Exception as e:
+                logger.warning("웹 폴백도 실패: %s", e)
 
     # ── Phase 1.5: Populate match_schedule for real-time 30-min job ──
     if sports_data:
