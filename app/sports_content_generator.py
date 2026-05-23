@@ -19,6 +19,8 @@ from app.sports_scraper import LEAGUE_EMOJI, Match, SportsData
 logger = get_logger("sports_content_generator")
 
 _PICK_MAP = {"home": "홈승", "draw": "무승부", "away": "원정승"}
+# Star count → confidence percentage mapping
+_STAR_CONFIDENCE: dict[int, int] = {5: 92, 4: 83, 3: 72, 2: 60, 1: 52}
 
 
 def _cta_html(url: str) -> str:
@@ -45,7 +47,7 @@ def _extract_pick(text: str) -> tuple[str, int, int]:
     for s in range(5, 0, -1):
         if "⭐" * s in text:
             stars = s
-            confidence = {5: 92, 4: 83, 3: 72, 2: 60, 1: 52}.get(s, 72)
+            confidence = _STAR_CONFIDENCE.get(s, 72)
             break
     return pick, stars, confidence
 
@@ -103,8 +105,8 @@ async def generate_match_preview(
             away_team=match.away_team, league_id=match.league_id,
             pick=pick, stars=stars, match_date=match.match_date,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("record_pick skipped (non-critical): %s", e)
     return {
         "text": text or "", "card_bytes": card_bytes, "image_url": image_url,
         "content_type": "sports_preview", "match_id": match.match_id or 0,
@@ -121,8 +123,8 @@ async def generate_match_review(
         try:
             from app.pick_tracker import record_result
             record_result(match.match_id or 0, match.home_score, match.away_score)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("record_result skipped (non-critical): %s", e)
 
     prev_pick_kr = ""
     try:
@@ -130,8 +132,8 @@ async def generate_match_review(
         prev = get_pick_for_match(match.match_id or 0)
         if prev:
             prev_pick_kr = _PICK_MAP.get(prev, prev)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("get_pick_for_match skipped (non-critical): %s", e)
 
     real_context = ""
     if sd:
@@ -178,10 +180,23 @@ async def generate_daily_sports_content(
         if len(posts) >= max_posts:
             break
         league_odds = odds_by_league.get(sd.league_id, [])
+        espn_odds_map: dict[int, dict] = getattr(sd, "espn_odds", {})
         for match in sorted(sd.upcoming, key=lambda m: m.match_date or _dt_max)[:2]:
             if len(posts) >= max_posts:
                 break
-            odds = match_odds_to_game(match.home_team, match.away_team, league_odds)
+            # ESPN embedded odds take priority (per-match); fall back to The Odds API
+            if match.match_id in espn_odds_map:
+                from app.odds_fetcher import MatchOdds
+                od = espn_odds_map[match.match_id]
+                odds = MatchOdds(
+                    home_team=match.home_team, away_team=match.away_team,
+                    home_win=od.get("home_win", 0.0), draw=od.get("draw", 0.0),
+                    away_win=od.get("away_win", 0.0),
+                    over_2_5=od.get("over_2_5", 0.0), under_2_5=od.get("under_2_5", 0.0),
+                    bookmaker="ESPN/DraftKings",
+                )
+            else:
+                odds = match_odds_to_game(match.home_team, match.away_team, league_odds)
             post = await generate_match_preview(match, cta_url, odds, accuracy_line, sd=sd)
             post.update({"media_type": "photo", "source": f"api:sports:{sd.league_name}", "league_id": sd.league_id})
             posts.append(post)

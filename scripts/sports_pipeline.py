@@ -18,6 +18,8 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -42,10 +44,7 @@ async def run_sports_collect_and_generate() -> int:
     from app.sports_content_generator import (
         generate_daily_sports_content,
     )
-    from app.sports_scraper import (
-        collect_sports_data,
-        collect_sports_data_web_fallback,
-    )
+    from app.sports_scraper import collect_sports_data, collect_sports_data_web_fallback
 
     ensure_channel_content_table()
 
@@ -78,9 +77,22 @@ async def run_sports_collect_and_generate() -> int:
                 await collect_sports_data_web_fallback()
             except Exception as e:
                 logger.warning("웹 폴백도 실패: %s", e)
+    # Supplement: ESPN for non-EU leagues (MLS/J1/Brasileirao — free, no auth)
+    try:
+        from app.espn_client import LEAGUE_TO_ESPN, collect_sports_data_espn
+        from app.sports_scraper import _get_league_ids
+        espn_ids = [lid for lid in _get_league_ids() if lid in LEAGUE_TO_ESPN]
+        if espn_ids:
+            espn_data = await collect_sports_data_espn(espn_ids)
+            if espn_data:
+                espn_league_ids = {e.league_id for e in espn_data}
+                sports_data = [sd for sd in sports_data if sd.league_id not in espn_league_ids]
+                sports_data.extend(espn_data)
+                logger.info("ESPN 수집 완료: %d리그", len(espn_data))
+    except Exception as e:
+        logger.warning("ESPN 수집 실패 (non-critical): %s", e)
 
     # ── Phase 1.5: Populate match_schedule + fetch odds (shared cache) ──
-    # odds_cache is built here and reused in Phase 2 to avoid double API calls
     from app.odds_fetcher import LEAGUE_SPORT_KEY, fetch_odds_for_league
     odds_cache: dict[int, list] = {}
 
@@ -247,20 +259,18 @@ async def run_sports_post() -> tuple[int, int]:
 
 async def main() -> None:
     """Full sports pipeline execution."""
-    import httpx
-
     bot_token = os.getenv("SUBSCRIBE_BOT_TOKEN", "")
     admin_id = os.getenv("ADMIN_ID", "")
 
-    def notify(text: str) -> None:
+    async def notify(text: str) -> None:
         if not bot_token or not admin_id:
             return
         try:
-            httpx.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={"chat_id": admin_id, "text": text[:4000]},
-                timeout=10,
-            )
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={"chat_id": admin_id, "text": text[:4000]},
+                )
         except Exception as e:
             logger.warning("Admin notify failed: %s", e)
 
@@ -275,12 +285,12 @@ async def main() -> None:
             f"• 그룹 토픽 게시: {grp_posted}건"
         )
         logger.info(result)
-        notify(result)
+        await notify(result)
 
     except Exception as e:
         error_msg = f"❌ [스포츠 자동화] 실패: {e}"
         logger.exception(error_msg)
-        notify(error_msg)
+        await notify(error_msg)
         sys.exit(1)
 
 
