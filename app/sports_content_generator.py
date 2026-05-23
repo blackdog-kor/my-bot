@@ -1,16 +1,8 @@
 """
 Sports Content Generator: per-match preview and review posts with real data.
 
-Pipeline per preview post:
-1. Fetch real odds (The Odds API) — optional, graceful fallback
-2. Build verified real-data context block (sports_context_builder)
-3. Generate AI analysis with data injected (sports_ai_client)
-4. Build Pillow match card image (match_card_generator)
-5. Record pick to pick_history DB (pick_tracker)
-6. Return {text, card_bytes, image_url, content_type, match_id}
-
-Periodic content (standings, weekly roundup, monthly report) →
-  see app/sports_periodic_content.py
+Periodic content (standings, weekly roundup, monthly report, top scorers)
+→ see app/sports_periodic_content.py
 """
 from __future__ import annotations
 
@@ -29,8 +21,6 @@ logger = get_logger("sports_content_generator")
 _PICK_MAP = {"home": "홈승", "draw": "무승부", "away": "원정승"}
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
 def _cta_html(url: str) -> str:
     return f"👉 <a href='{url}'>스포츠 베팅 시작하기</a>" if url else ""
 
@@ -48,14 +38,9 @@ def _fmt_match(match: Match, odds_section: str = "") -> str:
 
 def _extract_pick(text: str) -> tuple[str, int, int]:
     """Extract pick/stars/confidence from AI text. Returns English pick for DB storage."""
-    if "원정승" in text:
-        pick = "away"
-    elif "무승부" in text:
-        pick = "draw"
-    else:
-        if "홈승" not in text:
-            logger.debug("No explicit pick found in AI text — defaulting to home")
-        pick = "home"
+    pick = "away" if "원정승" in text else ("draw" if "무승부" in text else "home")
+    if pick == "home" and "홈승" not in text:
+        logger.debug("No explicit pick found — defaulting to home")
     stars, confidence = 3, 72
     for s in range(5, 0, -1):
         if "⭐" * s in text:
@@ -83,49 +68,34 @@ async def _build_card(
         return None
 
 
-# ── Match Preview ─────────────────────────────────────────────────────────────
-
 async def generate_match_preview(
-    match: Match,
-    cta_url: str = "",
-    odds=None,
-    accuracy_line: str = "",
-    sd: SportsData | None = None,
+    match: Match, cta_url: str = "", odds=None,
+    accuracy_line: str = "", sd: SportsData | None = None,
 ) -> dict[str, Any]:
     """Generate premium match preview: AI text + match card + pick record."""
     emoji = LEAGUE_EMOJI.get(match.league_id, "⚽")
     odds_section = build_odds_section(odds)
-
     real_context = ""
     if sd:
         real_context = build_real_match_context(
-            match,
-            all_results=sd.recent_results,
-            standings=sd.standings,
-            scorers=getattr(sd, "scorers", None),
+            match, all_results=sd.recent_results,
+            standings=sd.standings, scorers=getattr(sd, "scorers", None),
         )
     else:
-        logger.warning(
-            "No SportsData for %s vs %s — real data context omitted",
-            match.home_team, match.away_team,
-        )
+        logger.warning("No SportsData for %s vs %s", match.home_team, match.away_team)
 
-    user_prompt = (
+    text = await generate_text(
+        PREVIEW_SYSTEM_PROMPT,
         f"Generate a match preview for:\n\n{_fmt_match(match, odds_section)}\n\n"
-        f"League emoji: {emoji}\nMonthly accuracy: {accuracy_line or 'N/A'}\n\n"
-        f"{real_context}"
+        f"League emoji: {emoji}\nMonthly accuracy: {accuracy_line or 'N/A'}\n\n{real_context}",
+        _cta_html(cta_url),
     )
-    text = await generate_text(PREVIEW_SYSTEM_PROMPT, user_prompt, _cta_html(cta_url))
     pick, stars, confidence = _extract_pick(text or "")
-
     card_bytes = await _build_card(match, pick, stars, confidence, odds, accuracy_line)
-    image_url = None
-    if not card_bytes:
-        image_url = await fetch_sport_image(
-            league_id=match.league_id, home_team=match.home_team,
-            away_team=match.away_team, league_name=match.league_name,
-        )
-
+    image_url = None if card_bytes else await fetch_sport_image(
+        league_id=match.league_id, home_team=match.home_team,
+        away_team=match.away_team, league_name=match.league_name,
+    )
     try:
         from app.pick_tracker import record_pick
         record_pick(
@@ -135,26 +105,18 @@ async def generate_match_preview(
         )
     except Exception:
         pass
-
     return {
         "text": text or "", "card_bytes": card_bytes, "image_url": image_url,
         "content_type": "sports_preview", "match_id": match.match_id or 0,
     }
 
 
-# ── Match Review ──────────────────────────────────────────────────────────────
-
 async def generate_match_review(
-    match: Match,
-    cta_url: str = "",
-    odds=None,
-    accuracy_line: str = "",
-    sd: SportsData | None = None,
+    match: Match, cta_url: str = "", odds=None,
+    accuracy_line: str = "", sd: SportsData | None = None,
 ) -> dict[str, Any]:
-    """Generate post-match review with previous pick lookup and real data context."""
+    """Generate post-match review: real data context + previous pick lookup."""
     emoji = LEAGUE_EMOJI.get(match.league_id, "⚽")
-
-    # Record result first to update is_correct in pick_history
     if match.home_score is not None and match.away_score is not None:
         try:
             from app.pick_tracker import record_result
@@ -162,33 +124,28 @@ async def generate_match_review(
         except Exception:
             pass
 
-    # Look up pre-match pick for accurate review
     prev_pick_kr = ""
     try:
         from app.pick_tracker import get_pick_for_match
-        prev_pick = get_pick_for_match(match.match_id or 0)
-        if prev_pick:
-            prev_pick_kr = _PICK_MAP.get(prev_pick, prev_pick)
+        prev = get_pick_for_match(match.match_id or 0)
+        if prev:
+            prev_pick_kr = _PICK_MAP.get(prev, prev)
     except Exception:
         pass
 
-    # Build real context if SportsData provided
     real_context = ""
     if sd:
         real_context = build_real_match_context(
-            match,
-            all_results=sd.recent_results,
-            standings=sd.standings,
-            scorers=getattr(sd, "scorers", None),
+            match, all_results=sd.recent_results,
+            standings=sd.standings, scorers=getattr(sd, "scorers", None),
         )
 
-    user_prompt = (
+    text = await generate_text(
+        REVIEW_SYSTEM_PROMPT,
         f"Generate a post-match review:\n\n{_fmt_match(match)}\n\n"
-        f"League emoji: {emoji}\n"
-        f"Pre-match pick: {prev_pick_kr or '없음'}\n"
-        f"{real_context}"
+        f"League emoji: {emoji}\nPre-match pick: {prev_pick_kr or '없음'}\n{real_context}",
+        _cta_html(cta_url),
     )
-    text = await generate_text(REVIEW_SYSTEM_PROMPT, user_prompt, _cta_html(cta_url))
     image_url = await fetch_sport_image(
         league_id=match.league_id, home_team=match.home_team,
         away_team=match.away_team, league_name=match.league_name,
@@ -199,8 +156,6 @@ async def generate_match_review(
     }
 
 
-# ── Daily Batch ───────────────────────────────────────────────────────────────
-
 async def generate_daily_sports_content(
     sports_data: list[SportsData],
     max_posts: int = 6,
@@ -208,37 +163,30 @@ async def generate_daily_sports_content(
     odds_by_league: dict[int, list] | None = None,
     accuracy_line: str = "",
 ) -> list[dict[str, Any]]:
-    """Generate daily batch: previews (date-sorted) → reviews → weekly roundup → standings."""
+    """Generate daily batch: previews → reviews → weekly roundup → standings → top scorers."""
     from app.odds_fetcher import match_odds_to_game
-    from app.sports_periodic_content import generate_standings_post, generate_weekly_roundup
+    from app.sports_periodic_content import (
+        generate_standings_post, generate_top_scorer_post, generate_weekly_roundup,
+    )
 
     posts: list[dict[str, Any]] = []
     odds_by_league = odds_by_league or {}
-    now = datetime.now(timezone.utc)
+    _dt_max = datetime(9999, 12, 31, tzinfo=timezone.utc)
 
-    # ── Phase 1: Match previews (upcoming, sorted by kickoff) ─────────────────
+    # Phase 1: previews sorted by kickoff
     for sd in sports_data:
         if len(posts) >= max_posts:
             break
         league_odds = odds_by_league.get(sd.league_id, [])
-        # Sort by match_date ascending so most imminent matches post first
-        sorted_upcoming = sorted(
-            sd.upcoming,
-            key=lambda m: m.match_date or datetime(9999, 12, 31, tzinfo=timezone.utc),
-        )
-        for match in sorted_upcoming[:2]:
+        for match in sorted(sd.upcoming, key=lambda m: m.match_date or _dt_max)[:2]:
             if len(posts) >= max_posts:
                 break
             odds = match_odds_to_game(match.home_team, match.away_team, league_odds)
             post = await generate_match_preview(match, cta_url, odds, accuracy_line, sd=sd)
-            post.update({
-                "media_type": "photo",
-                "source": f"api:sports:{sd.league_name}",
-                "league_id": sd.league_id,
-            })
+            post.update({"media_type": "photo", "source": f"api:sports:{sd.league_name}", "league_id": sd.league_id})
             posts.append(post)
 
-    # ── Phase 2: Match reviews (recent results) ───────────────────────────────
+    # Phase 2: reviews
     for sd in sports_data:
         if len(posts) >= max_posts:
             break
@@ -246,42 +194,44 @@ async def generate_daily_sports_content(
             if len(posts) >= max_posts:
                 break
             post = await generate_match_review(match, cta_url, accuracy_line=accuracy_line, sd=sd)
-            post.update({
-                "media_type": "photo",
-                "source": f"api:sports:{sd.league_name}",
-                "league_id": sd.league_id,
-            })
+            post.update({"media_type": "photo", "source": f"api:sports:{sd.league_name}", "league_id": sd.league_id})
             posts.append(post)
 
-    # ── Phase 3: Weekly roundup (if still under max) ──────────────────────────
+    # Phase 3: weekly roundup
     if len(posts) < max_posts:
         try:
-            roundup = await generate_weekly_roundup(sports_data, cta_url)
-            if roundup:
-                roundup.update({
-                    "media_type": "photo",
-                    "source": "api:sports:weekly",
-                    "league_id": 0,
-                })
-                posts.append(roundup)
+            p = await generate_weekly_roundup(sports_data, cta_url)
+            if p:
+                p.update({"media_type": "photo", "source": "api:sports:weekly", "league_id": 0})
+                posts.append(p)
         except Exception as e:
             logger.warning("Weekly roundup skipped: %s", e)
 
-    # ── Phase 4: Standings (one league, if still under max) ───────────────────
+    # Phase 4: standings
     if len(posts) < max_posts:
         for sd in sports_data:
             if sd.standings:
                 try:
-                    post = await generate_standings_post(sd.standings, sd.league_id, cta_url)
-                    if post:
-                        post.update({
-                            "media_type": "photo",
-                            "source": f"api:sports:{sd.league_name}",
-                            "league_id": sd.league_id,
-                        })
-                        posts.append(post)
+                    p = await generate_standings_post(sd.standings, sd.league_id, cta_url)
+                    if p:
+                        p.update({"media_type": "photo", "source": f"api:sports:{sd.league_name}", "league_id": sd.league_id})
+                        posts.append(p)
                 except Exception as e:
-                    logger.warning("Standings post skipped: %s", e)
+                    logger.warning("Standings skipped: %s", e)
+                break
+
+    # Phase 5: top scorer race
+    if len(posts) < max_posts:
+        for sd in sports_data:
+            scorers = getattr(sd, "scorers", None)
+            if scorers:
+                try:
+                    p = await generate_top_scorer_post(scorers, sd.league_id, cta_url)
+                    if p:
+                        p.update({"media_type": "photo", "source": f"api:sports:{sd.league_name}", "league_id": sd.league_id})
+                        posts.append(p)
+                except Exception as e:
+                    logger.warning("Top scorer skipped: %s", e)
                 break
 
     logger.info("Generated %d sports posts", len(posts))

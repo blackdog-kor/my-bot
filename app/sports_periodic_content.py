@@ -15,6 +15,7 @@ from app.sports_image_fetcher import fetch_sport_image
 from app.sports_prompts import (
     MONTHLY_REPORT_PROMPT,
     STANDINGS_SYSTEM_PROMPT,
+    TOP_SCORER_PROMPT,
     WEEKLY_ROUNDUP_PROMPT,
 )
 from app.sports_scraper import LEAGUE_EMOJI, LEAGUE_NAMES, Match, SportsData, TeamStanding
@@ -165,3 +166,37 @@ async def generate_monthly_report(cta_url: str = "") -> dict[str, Any] | None:
         "content_type": "sports_monthly_report",
         "match_id": 0,
     }
+
+
+async def generate_top_scorer_post(
+    scorers: list[dict],
+    league_id: int,
+    cta_url: str = "",
+) -> dict[str, Any] | None:
+    """Generate a top scorer race post from scorers data (already fetched by FD client)."""
+    if not scorers:
+        return None
+    league_name = LEAGUE_NAMES.get(league_id, f"League {league_id}")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    scorer_lines = "\n".join(
+        f"{i+1}. {s['name']} ({s['team']}): {s['goals']}골"
+        for i, s in enumerate(scorers[:5])
+    )
+    user_prompt = (
+        f"League: {league_name}\nDate: {today}\n\nTop scorers:\n{scorer_lines}"
+    )
+    try:
+        text = await generate_text(TOP_SCORER_PROMPT, user_prompt, _cta_html(cta_url))
+        if not text:
+            return None
+        image_url = await fetch_sport_image(league_id=league_id, league_name=league_name)
+        return {
+            "text": text,
+            "card_bytes": None,
+            "image_url": image_url,
+            "content_type": "sports_top_scorers",
+            "match_id": 0,
+        }
+    except Exception as e:
+        logger.warning("generate_top_scorer_post failed (league=%d): %s", league_id, e)
+        return None

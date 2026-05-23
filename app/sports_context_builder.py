@@ -92,6 +92,44 @@ def _standing_lines(label: str, st: TeamStanding, results: list[Match] | None = 
     return lines
 
 
+def _get_h2h(
+    home_team: str,
+    away_team: str,
+    results: list[Match],
+    n: int = 3,
+) -> list[str]:
+    """Mine recent_results for head-to-head matches between the two teams."""
+    lines: list[str] = []
+    h_lower = home_team.lower()
+    a_lower = away_team.lower()
+    for m in reversed(results):
+        if m.home_score is None or m.away_score is None:
+            continue
+        mh = m.home_team.lower()
+        ma = m.away_team.lower()
+        # Match if either direction (home/away can be swapped in past meetings)
+        same_pair = (
+            (h_lower.split()[0] in mh or mh in h_lower) and
+            (a_lower.split()[0] in ma or ma in a_lower)
+        ) or (
+            (a_lower.split()[0] in mh or mh in a_lower) and
+            (h_lower.split()[0] in ma or ma in h_lower)
+        )
+        if not same_pair:
+            continue
+        date_str = m.match_date.strftime("%Y-%m-%d") if m.match_date else "?"
+        if m.home_score > m.away_score:
+            winner = m.home_team
+        elif m.away_score > m.home_score:
+            winner = m.away_team
+        else:
+            winner = "무승부"
+        lines.append(f"  {m.home_team} {m.home_score}-{m.away_score} {m.away_team}  [{date_str}] → {winner}")
+        if len(lines) >= n:
+            break
+    return lines
+
+
 def build_real_match_context(
     match: Match,
     all_results: list[Match],
@@ -131,6 +169,13 @@ def build_real_match_context(
     if away_recent:
         lines.append(f"[{match.away_team} 최근 경기 결과]")
         lines.extend(away_recent)
+        lines.append("")
+
+    # H2H from existing results (zero extra API calls)
+    h2h = _get_h2h(match.home_team, match.away_team, all_results, n=3)
+    if h2h:
+        lines.append("[두 팀 최근 직접 대결 (H2H)]")
+        lines.extend(h2h)
         lines.append("")
 
     if scorers:

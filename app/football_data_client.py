@@ -169,24 +169,31 @@ async def fetch_league_data(
 
     try:
         standings_data = await _fd_request(f"/competitions/{code}/standings")
-        for table in standings_data.get("standings", []):
-            if table.get("type") == "TOTAL":
-                for row in table.get("table", [])[:20]:  # all 20 PL teams, not just top 10
-                    team = row.get("team", {})
-                    sd.standings.append(TeamStanding(
-                        team_name=team.get("name", ""),
-                        rank=row.get("position", 0),
-                        played=row.get("playedGames", 0),
-                        wins=row.get("won", 0),
-                        draws=row.get("draw", 0),
-                        losses=row.get("lost", 0),
-                        goals_for=row.get("goalsFor", 0),
-                        goals_against=row.get("goalsAgainst", 0),
-                        goal_difference=row.get("goalDifference", 0),
-                        points=row.get("points", 0),
-                        form=row.get("form", ""),
-                    ))
-                break
+        all_tables = standings_data.get("standings", [])
+        # Prefer TOTAL; fall back to first table (handles WC/tournament group stages)
+        target_table = next(
+            (t for t in all_tables if t.get("type") == "TOTAL"),
+            all_tables[0] if all_tables else None,
+        )
+        if target_table:
+            table_type = target_table.get("type", "UNKNOWN")
+            if table_type != "TOTAL":
+                logger.info("FD standings: no TOTAL table for %s — using type=%s", code, table_type)
+            for row in target_table.get("table", [])[:20]:
+                team = row.get("team", {})
+                sd.standings.append(TeamStanding(
+                    team_name=team.get("name", ""),
+                    rank=row.get("position", 0),
+                    played=row.get("playedGames", 0),
+                    wins=row.get("won", 0),
+                    draws=row.get("draw", 0),
+                    losses=row.get("lost", 0),
+                    goals_for=row.get("goalsFor", 0),
+                    goals_against=row.get("goalsAgainst", 0),
+                    goal_difference=row.get("goalDifference", 0),
+                    points=row.get("points", 0),
+                    form=row.get("form", ""),
+                ))
     except Exception as e:
         logger.warning("FD standings failed (%s): %s", code, e)
 

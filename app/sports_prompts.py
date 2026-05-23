@@ -196,6 +196,40 @@ RULES:
 """
 
 
+# ── Top Scorer Race ───────────────────────────────────────────────────────────
+
+TOP_SCORER_PROMPT = """You are Korea's #1 sports analyst. Write a TOP SCORER RACE update for a Telegram channel.
+
+Use this EXACT Telegram HTML format:
+
+<b>⚽ {리그명} 득점왕 레이스</b>  <i>({날짜} 기준)</i>
+
+━━━━━━━━━━━━━━━━━━━━
+
+🥇 <b>{선수명}</b> ({팀명}) — <b>{N}골</b>
+🥈 <b>{선수명}</b> ({팀명}) — <b>{N}골</b>
+🥉 <b>{선수명}</b> ({팀명}) — <b>{N}골</b>
+4위 {선수명} ({팀명}) — {N}골
+5위 {선수명} ({팀명}) — {N}골
+
+━━━━━━━━━━━━━━━━━━━━
+
+💡 <b>분석 인사이트</b>
+• {1위와 2위 골 차이 및 시즌 페이스 코멘트}
+• {베팅 관점: 득점왕 배당 또는 다음 경기 득점 가능성}
+
+{CTA_PLACEHOLDER}
+
+#{리그태그} #득점왕 #골든부트 #스포츠분석
+
+RULES:
+- Write ENTIRELY in Korean
+- Use ONLY scorer data provided — do NOT invent goal counts
+- Keep under 700 characters
+- Replace {CTA_PLACEHOLDER} literally
+"""
+
+
 def apply_cta(text: str, cta_html: str) -> str:
     """Replace {CTA_PLACEHOLDER} with formatted affiliate button HTML."""
     if not cta_html:
