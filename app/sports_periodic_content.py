@@ -77,7 +77,10 @@ async def generate_standings_post(
         text = await generate_text(STANDINGS_SYSTEM_PROMPT, prompt_data, _cta_html(cta_url))
         if not text:
             return None
-        image_url = await fetch_sport_image(league_id=league_id, league_name=league_name)
+        image_url = await fetch_sport_image(
+            league_id=league_id, league_name=league_name,
+            content_type="sports_standings",
+        )
         return {
             "text": text,
             "card_bytes": None,
@@ -113,7 +116,9 @@ async def generate_weekly_roundup(
         if not text:
             return None
         first_league = sports_data[0].league_id if sports_data else _DEFAULT_LEAGUE_ID
-        image_url = await fetch_sport_image(league_id=first_league)
+        image_url = await fetch_sport_image(
+            league_id=first_league, content_type="sports_weekly_roundup",
+        )
         return {
             "text": text,
             "card_bytes": None,
@@ -140,7 +145,7 @@ async def generate_monthly_report(cta_url: str = "") -> dict[str, Any] | None:
         logger.info("Monthly report: too few picks (%d) — skipping", acc["total"])
         return None
 
-    month_name = datetime.now().strftime("%m")
+    month_name = datetime.now(timezone.utc).strftime("%m")
     streak_line = ""
     if streak >= 3:
         streak_line = f"Current streak: {streak} consecutive wins"
@@ -189,7 +194,10 @@ async def generate_top_scorer_post(
         text = await generate_text(TOP_SCORER_PROMPT, user_prompt, _cta_html(cta_url))
         if not text:
             return None
-        image_url = await fetch_sport_image(league_id=league_id, league_name=league_name)
+        image_url = await fetch_sport_image(
+            league_id=league_id, league_name=league_name,
+            content_type="sports_top_scorers",
+        )
         return {
             "text": text,
             "card_bytes": None,

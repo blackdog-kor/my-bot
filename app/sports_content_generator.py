@@ -97,6 +97,7 @@ async def generate_match_preview(
     image_url = None if card_bytes else await fetch_sport_image(
         league_id=match.league_id, home_team=match.home_team,
         away_team=match.away_team, league_name=match.league_name,
+        content_type="sports_preview",
     )
     try:
         from app.pick_tracker import record_pick
@@ -151,6 +152,7 @@ async def generate_match_review(
     image_url = await fetch_sport_image(
         league_id=match.league_id, home_team=match.home_team,
         away_team=match.away_team, league_name=match.league_name,
+        content_type="sports_review",
     )
     return {
         "text": text or "", "card_bytes": None, "image_url": image_url,
