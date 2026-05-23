@@ -543,67 +543,70 @@ async def debug_terabox_test(request: Request, url: str = ""):
     """TeraBox 에이전트 수동 테스트 엔드포인트.
 
     사용법:
-    - /debug/terabox-test — 설정된 TERABOX_SHARE_URLS 전체 수집 테스트
-    - /debug/terabox-test?url=https://terabox.com/s/xxx — 단일 URL 테스트
+    - /debug/terabox-test — TERABOX_COOKIES 인증 후 스토리지에서 카지노 영상 수집 테스트
+    - /debug/terabox-test?url=https://terabox.com/s/xxx — 단일 공유 링크 테스트
+
+    SETUP: TERABOX_COOKIES="BDUSS=xxx;BAIDUID=yyy" 환경변수 필요.
+    (테라박스 로그인 후 DevTools → Application → Cookies에서 복사)
     """
     if not _check_debug_auth(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     from app.terabox_agent import (
+        collect_terabox_content,
         extract_terabox_info,
-        get_share_urls,
         is_terabox_url,
+        is_share_url,
     )
 
-    # 단일 URL 테스트 모드
+    cookies_configured = bool(settings.terabox_cookies.strip())
+
+    # Single share URL test mode
     if url:
         if not is_terabox_url(url):
             return {"status": "error", "error": "유효한 TeraBox URL이 아닙니다.", "url": url}
-
+        if not is_share_url(url):
+            return {
+                "status": "error",
+                "error": "AI 인덱스/워크스페이스 URL은 지원하지 않습니다. /s/XXXXX 형식의 공유 링크가 필요합니다.",
+                "url": url,
+            }
         item = await extract_terabox_info(url)
         if item:
             return {
-                "status": "ok",
-                "mode": "single_url",
+                "status": "ok", "mode": "single_url",
                 "item": {
-                    "share_url": item.share_url,
-                    "title": item.title,
-                    "file_name": item.file_name,
-                    "file_size": item.file_size,
-                    "media_type": item.media_type,
-                    "download_url": item.download_url,
-                    "thumbnail_url": item.thumbnail_url,
+                    "share_url": item.share_url, "title": item.title,
+                    "file_name": item.file_name, "file_size": item.file_size,
+                    "media_type": item.media_type, "download_url": item.download_url,
                 },
             }
         return {"status": "fail", "mode": "single_url", "error": "메타데이터 추출 실패", "url": url}
 
-    # 전체 URL 수집 테스트 모드
-    configured_urls = get_share_urls()
-    if not configured_urls:
+    # Full storage collection test
+    if not cookies_configured:
         return {
-            "status": "no_urls",
-            "error": "TERABOX_SHARE_URLS 환경변수가 미설정이거나 유효한 URL이 없습니다.",
+            "status": "setup_required",
+            "message": (
+                "TERABOX_COOKIES 환경변수가 필요합니다. "
+                "terabox.com 로그인 후 DevTools → Application → Cookies에서 "
+                "BDUSS와 BAIDUID 값을 복사하여 'BDUSS=xxx;BAIDUID=yyy' 형식으로 설정하세요."
+            ),
             "terabox_enabled": settings.terabox_enabled,
         }
 
-    from app.terabox_agent import collect_terabox_content
-
     result = await collect_terabox_content()
     return {
-        "status": "ok" if result.success_count > 0 else "fail",
-        "mode": "full_collect",
+        "status": "ok" if result.success_count > 0 else "no_content",
+        "mode": "storage_collect",
         "total_processed": result.total_processed,
         "success_count": result.success_count,
         "errors": result.errors,
         "items": [
             {
-                "share_url": item.share_url,
-                "title": item.title,
-                "file_name": item.file_name,
-                "file_size": item.file_size,
-                "media_type": item.media_type,
-                "download_url": item.download_url,
-                "thumbnail_url": item.thumbnail_url,
+                "share_url": item.share_url, "title": item.title,
+                "file_name": item.file_name, "file_size": item.file_size,
+                "media_type": item.media_type, "download_url": bool(item.download_url),
             }
             for item in result.items
         ],

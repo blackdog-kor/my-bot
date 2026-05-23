@@ -137,18 +137,18 @@ async def main() -> None:
     """TeraBox 전체 파이프라인 실행."""
     import httpx
 
-    bot_token = os.getenv("BOT_TOKEN", "")
+    bot_token = os.getenv("SUBSCRIBE_BOT_TOKEN", "") or os.getenv("BOT_TOKEN", "")
     admin_id = os.getenv("ADMIN_ID", "")
 
-    def notify(text: str) -> None:
+    async def notify(text: str) -> None:
         if not bot_token or not admin_id:
             return
         try:
-            httpx.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={"chat_id": admin_id, "text": text[:4000]},
-                timeout=10,
-            )
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={"chat_id": admin_id, "text": text[:4000]},
+                )
         except Exception:
             pass
 
@@ -165,12 +165,12 @@ async def main() -> None:
             f"• 채널 게시: {posted}개"
         )
         logger.info(result_msg)
-        notify(result_msg)
+        await notify(result_msg)
 
     except Exception as e:
         error_msg = f"❌ [TeraBox 파이프라인] 실패: {e}"
         logger.exception(error_msg)
-        notify(error_msg)
+        await notify(error_msg)
         sys.exit(1)
 
 
