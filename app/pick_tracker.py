@@ -108,6 +108,24 @@ def record_result(match_id: int, home_score: int, away_score: int) -> None:
         logger.warning("record_result failed: %s", e)
 
 
+def get_pick_for_match(match_id: int) -> str | None:
+    """Retrieve the previously recorded pick for a match (used in review posts)."""
+    from app.pg_broadcast import _get_conn
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT pick FROM pick_history WHERE match_id = %s LIMIT 1",
+                (match_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            return row[0] if row else None
+    except Exception as e:
+        logger.warning("get_pick_for_match failed: %s", e)
+        return None
+
+
 def get_monthly_accuracy() -> dict[str, Any]:
     """Return this month's pick accuracy stats."""
     from app.pg_broadcast import _get_conn

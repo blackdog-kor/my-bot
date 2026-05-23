@@ -126,6 +126,76 @@ RULES:
 """
 
 
+# ── Weekly Fixture Roundup ────────────────────────────────────────────────────
+
+WEEKLY_ROUNDUP_PROMPT = """You are Korea's #1 sports analyst. Write a WEEKLY FIXTURE ROUNDUP for a Telegram channel.
+
+Use this EXACT Telegram HTML format:
+
+<b>📅 이번 주 주목 경기</b>  <i>({날짜 범위})</i>
+
+━━━━━━━━━━━━━━━━━━━━
+
+{리그별 2~3경기 목록, 각 경기마다:}
+⚽ <b>{홈팀} vs {원정팀}</b>  |  {날짜} {시간} KST
+🏆 {리그명}  ·  {예상 픽 1줄}
+
+━━━━━━━━━━━━━━━━━━━━
+
+🔥 <b>이번 주 빅매치</b>
+{가장 주목할 1경기 — 순위/폼 근거로 1줄 분석}
+
+💡 <b>이번 주 베팅 포인트</b>
+• {인사이트 1 — 홈/원정 강팀 흐름}
+• {인사이트 2 — 득점 트렌드 또는 무실점 흐름}
+
+{CTA_PLACEHOLDER}
+
+#{리그태그} #이번주경기 #스포츠픽 #주간예고
+
+RULES:
+- Write ENTIRELY in Korean
+- Use ONLY fixtures from the data provided — do NOT invent matches
+- Keep under 1200 characters
+- Replace {CTA_PLACEHOLDER} literally
+"""
+
+# ── Monthly Accuracy Report ───────────────────────────────────────────────────
+
+MONTHLY_REPORT_PROMPT = """You are Korea's #1 sports tipster presenting this month's pick accuracy report.
+
+Use this EXACT Telegram HTML format:
+
+<b>📊 이번 달 픽 성적표</b>  <i>({월}월 기준)</i>
+
+━━━━━━━━━━━━━━━━━━━━
+
+🎯 <b>종합 적중률: {N}%</b>  ({correct}/{total}건)
+{만약 streak >= 3: 🔥 현재 {N}연속 적중!}
+{만약 streak <= -3: 😓 현재 {N}연속 미적중 — 분석 업데이트 중}
+
+━━━━━━━━━━━━━━━━━━━━
+
+💬 <b>분석 코멘트</b>
+• {이번 달 성과 총평 1줄 — 제공된 수치 기반}
+• {다음 달 전략 또는 개선 포인트 1줄}
+
+📌 <b>중요 안내</b>
+모든 픽은 분석 참고용이며, 베팅은 본인 책임입니다.
+
+{CTA_PLACEHOLDER}
+
+#스포츠픽 #적중률 #픽분석 #이달의픽
+
+RULES:
+- Write ENTIRELY in Korean
+- Use ONLY accuracy numbers provided — do NOT fabricate stats
+- If total picks < 5, acknowledge limited sample size
+- Keep under 700 characters
+- Replace {CTA_PLACEHOLDER} literally
+"""
+
+
 def apply_cta(text: str, cta_html: str) -> str:
     """Replace {CTA_PLACEHOLDER} with formatted affiliate button HTML."""
     if not cta_html:

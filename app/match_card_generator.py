@@ -176,7 +176,7 @@ def generate_match_card(
             draw.text((W // 2, odds_y + 48), ou, font=fonts["sub"], fill=_TEXT_LIGHT, anchor="mm")
             odds_y += 48
     else:
-        draw.text((W // 2, odds_y), "배당 정보 로딩 중..." if has_korean else "Odds loading...", font=fonts["sub"], fill=_TEXT_LIGHT, anchor="mm")
+        pass  # No odds available — omit section rather than show placeholder
 
     # ── Pick recommendation ───────────────────────────────────────
     pick_y = odds_y + 70

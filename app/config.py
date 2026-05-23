@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     # European leagues (PL/LaLiga/etc) are off-season May-Jul — add them back in August
     sports_leagues: str = "1,292,98,253,71"  # WorldCup,KLeague,J1,MLS,Brasileirao
     sports_post_interval_hours: int = 6  # hours between sports posts
-    sports_max_daily_posts: int = 4  # max sports posts per day
+    sports_max_daily_posts: int = 6  # max sports posts per day (min 6 for dedicated board)
     sports_topic_content_type: str = "sports"  # content_type for forum topic routing
     pexels_api_key: str = ""          # Pexels API key for sports post images (free: 200 req/hr)
     odds_api_key: str = ""            # The Odds API key for real betting odds (free: 500 req/month)

@@ -24,14 +24,20 @@ _BASE = "https://api.the-odds-api.com/v4"
 
 # API-Football league_id → The Odds API sport key
 LEAGUE_SPORT_KEY: dict[int, str] = {
-    39: "soccer_epl",
+    # European leagues (active Aug-May)
+    39:  "soccer_epl",
     140: "soccer_spain_la_liga",
     135: "soccer_italy_serie_a",
-    61: "soccer_france_ligue_one",
-    78: "soccer_germany_bundesliga",
-    2: "soccer_uefa_champs_league",
-    3: "soccer_uefa_europa_league",
+    61:  "soccer_france_ligue_one",
+    78:  "soccer_germany_bundesliga",
+    2:   "soccer_uefa_champs_league",
+    3:   "soccer_uefa_europa_league",
+    # Non-European leagues (active during EU off-season May-Aug)
     292: "soccer_korea_kleague1",
+    98:  "soccer_japan_j_league",
+    253: "soccer_usa_mls",
+    71:  "soccer_brazil_campeonato",
+    1:   "soccer_fifa_world_cup",       # FIFA World Cup 2026 (Jun 12–Jul 19)
 }
 
 
@@ -125,7 +131,7 @@ def _fuzzy_match(name: str, candidates: list[str], threshold: float = 0.7) -> st
 
 async def fetch_odds_for_league(
     league_id: int,
-    hours_ahead: int = 72,
+    hours_ahead: int = 168,
 ) -> list[MatchOdds]:
     """Fetch upcoming match odds for a league. Returns empty list on failure."""
     api_key = settings.odds_api_key
