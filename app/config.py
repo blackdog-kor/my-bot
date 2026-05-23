@@ -73,9 +73,14 @@ class Settings(BaseSettings):
     # ── Sports Content Automation ─────────────────────────────────
     sports_enabled: bool = True  # enable sports content pipeline
     sports_api_key: str = ""  # API-Football key (api-sports.io)
-    # Active leagues for May-Aug: World Cup 2026, K League, J League, MLS, Brasileirao
-    # European leagues (PL/LaLiga/etc) are off-season May-Jul — add them back in August
-    sports_leagues: str = "1,292,98,253,71"  # WorldCup,KLeague,J1,MLS,Brasileirao
+    # League strategy by period (FD free plan supported only):
+    #   May-Jun:  WC(1) + CL(2) + EL(3) + EU big5(39,140,135,61,78)
+    #             → CL Final May 30, WC starts Jun 12, EU season ends May 24
+    #   Jul-Aug:  WC(1) + CL/EL qualifiers(2,3)  → EU leagues restart Aug
+    #   Sep-May:  WC(1) + EU big5 + CL/EL  → full season
+    # Note: K리그(292)/MLS(253)/J1(98)/Brasileirao(71) NOT on FD free plan;
+    #       API-Football free plan only covers 2022-2024 seasons — 2026 blocked.
+    sports_leagues: str = "1,2,3,39,140,135,61,78"
     sports_post_interval_hours: int = 6  # hours between sports posts
     sports_max_daily_posts: int = 6  # max sports posts per day (min 6 for dedicated board)
     sports_topic_content_type: str = "sports"  # content_type for forum topic routing
