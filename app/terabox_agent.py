@@ -2,7 +2,8 @@
 TeraBox Content Agent: cookie-based API, no browser required on Railway.
 
 SETUP: Log into terabox.com → DevTools → Application → Cookies
-→ copy BDUSS + BAIDUID → set TERABOX_COOKIES="BDUSS=xxx;BAIDUID=yyy".
+  Google login:  TERABOX_COOKIES="ndus=xxx;csrfToken=yyy;browserid=zzz"
+  Baidu login:   TERABOX_COOKIES="BDUSS=xxx;BAIDUID=yyy"
 """
 from __future__ import annotations
 
@@ -79,7 +80,7 @@ def _classify(name: str) -> str:
 def _sz(b: int) -> str:
     for u in ("B", "KB", "MB", "GB"):
         if b < 1024: return f"{b:.1f} {u}"
-        b //= 1024  # type: ignore[assignment]
+        b /= 1024  # type: ignore[assignment]
     return f"{b:.1f} TB"
 
 async def _tb_get(path: str, params: dict, ck: dict) -> dict:
@@ -138,17 +139,17 @@ async def extract_terabox_info(share_url: str) -> TeraBoxItem | None:
 async def collect_terabox_content() -> TeraBoxRunResult:
     """Collect casino videos from authenticated TeraBox storage.
 
-    Requires TERABOX_COOKIES="BDUSS=xxx;BAIDUID=yyy" env var.
+    Requires TERABOX_COOKIES with 'ndus' (Google login) or 'BDUSS' (Baidu login).
     """
     result = TeraBoxRunResult()
     ck_str = settings.terabox_cookies.strip()
     if not ck_str:
-        logger.warning("TERABOX_COOKIES not set — set 'BDUSS=xxx;BAIDUID=yyy' from terabox.com DevTools → Cookies")
+        logger.warning("TERABOX_COOKIES not set — Google login: 'ndus=xxx', Baidu login: 'BDUSS=xxx'")
         return result
     ck = _cookies(ck_str)
-    if "BDUSS" not in ck:
-        logger.error("TERABOX_COOKIES must include BDUSS")
-        result.errors.append("BDUSS missing from TERABOX_COOKIES")
+    if "ndus" not in ck and "BDUSS" not in ck:
+        logger.error("TERABOX_COOKIES must include 'ndus' (Google login) or 'BDUSS' (Baidu login)")
+        result.errors.append("ndus/BDUSS missing from TERABOX_COOKIES")
         return result
     try:
         files = await _api_list(ck)
