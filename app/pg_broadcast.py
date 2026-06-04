@@ -89,7 +89,8 @@ def ensure_pg_table():
                     click_count      INTEGER     DEFAULT 0,
                     unique_ref       TEXT,
                     retry_sent       BOOLEAN     DEFAULT FALSE,
-                    retry_sent_at    TIMESTAMPTZ
+                    retry_sent_at    TIMESTAMPTZ,
+                    tier             TEXT        NOT NULL DEFAULT 'standard'
                 )
             """)
             conn.commit()
@@ -101,6 +102,7 @@ def ensure_pg_table():
                 ("unique_ref",    "TEXT"),
                 ("retry_sent",    "BOOLEAN DEFAULT FALSE"),
                 ("retry_sent_at", "TIMESTAMPTZ"),
+                ("tier",          "TEXT NOT NULL DEFAULT 'standard'"),
             ]
             for col_name, col_type in extra_columns:
                 try:
@@ -535,6 +537,69 @@ def get_retry_sent_count() -> int:
 # ─────────────────────────────────────────────
 # Subscribe Bot 전용 헬퍼
 # ─────────────────────────────────────────────
+
+def set_user_tier(user_id: int, tier: str) -> bool:
+    """Update the tier for a broadcast target. tier: 'standard' | 'vip'."""
+    _ALLOWED_TIERS = {"standard", "vip"}
+    if tier not in _ALLOWED_TIERS:
+        logger.warning("set_user_tier: invalid tier %r", tier)
+        return False
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE broadcast_targets SET tier = %s WHERE telegram_user_id = %s",
+                (tier, user_id),
+            )
+            updated = cur.rowcount > 0
+            conn.commit()
+            cur.close()
+            return updated
+    except Exception as e:
+        logger.warning("set_user_tier failed: %s", e)
+        return False
+
+
+def get_unsent_users_by_tier(tier: str = "vip", limit: int = 500) -> list[tuple[int, str]]:
+    """Return unsent users filtered by tier (telegram_user_id, username)."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT telegram_user_id, username
+                FROM broadcast_targets
+                WHERE is_sent = FALSE
+                  AND tier = %s
+                  AND username IS NOT NULL
+                  AND username <> ''
+                ORDER BY added_at
+                LIMIT %s
+            """, (tier, limit))
+            rows = cur.fetchall()
+            cur.close()
+            return rows
+    except Exception as e:
+        logger.warning("get_unsent_users_by_tier failed: %s", e)
+        return []
+
+
+def count_by_tier() -> dict:
+    """Return per-tier counts for broadcast_targets."""
+    try:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT tier, COUNT(*) FROM broadcast_targets
+                GROUP BY tier
+                ORDER BY tier
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            return {row[0]: row[1] for row in rows}
+    except Exception as e:
+        logger.warning("count_by_tier failed: %s", e)
+        return {}
+
 
 def get_subscribe_user_ids() -> list[int]:
     """subscribe_bot source 구독자의 telegram_user_id 목록 반환."""

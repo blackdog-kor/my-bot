@@ -66,7 +66,7 @@
 - [ ] DM 발송 스케줄 활성화 (`scheduler.py` 주석 해제)
 - [ ] GitHub Projects Kanban 보드 설정
 - [ ] 콘텐츠 자동화 A/B 테스트 (리라이팅 변형별 조회수 비교)
-- [ ] VIP 세분화 — `broadcast_targets`에 tier 컬럼 추가
+- [x] VIP 세분화 — `broadcast_targets`에 tier 컬럼 추가
 - [ ] 리텐션 자동 푸시 시퀀스 (가입 후 3일/7일/14일)
 
 ---
