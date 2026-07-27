@@ -931,7 +931,7 @@ def save_channel_content(
             cur.close()
             return row[0] if row else None
     except Exception as e:
-        logger.warning("save_channel_content failed: %s", e)
+        logger.exception("save_channel_content failed: %s", e)
         return None
 
 

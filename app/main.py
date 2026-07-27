@@ -818,6 +818,24 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
                 cur.close()
         except Exception:
             pass
+        # Diagnose DB insert capability before attempting saves
+        try:
+            with _get_conn() as _conn:
+                _cur = _conn.cursor()
+                _cur.execute(
+                    "INSERT INTO channel_content (original_text, source_channel, source_msg_id, image_url) "
+                    "VALUES (%s, %s, %s, %s) RETURNING id",
+                    ("__diag_test__", "__diag__", -9999, None),
+                )
+                _test_id = _cur.fetchone()
+                if _test_id:
+                    _cur.execute("DELETE FROM channel_content WHERE id = %s", (_test_id[0],))
+                _conn.commit()
+                _cur.close()
+                diag["db_insert_test"] = "ok"
+        except Exception as _db_exc:
+            diag["db_insert_test"] = f"FAILED: {_db_exc}"
+
         saved = 0
         skipped_dup = 0
         save_errors: list[str] = []
@@ -837,7 +855,7 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
                 if cid:
                     saved += 1
                 else:
-                    save_errors.append(f"save_channel_content returned None (src={src}, mid={mid})")
+                    save_errors.append(f"None returned (src={src}, mid={mid})")
             except Exception as exc:
                 save_errors.append(f"{src}/{mid}: {exc}")
         diag["skipped_duplicates"] = skipped_dup
