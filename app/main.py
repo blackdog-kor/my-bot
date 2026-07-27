@@ -820,22 +820,30 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
             pass
         saved = 0
         skipped_dup = 0
+        save_errors: list[str] = []
         for p in posts:
             src = p.get("source", "sports")
             mid = p.get("match_id", 0)
             if is_content_duplicate(src, mid):
                 skipped_dup += 1
                 continue
-            cid = save_channel_content(
-                original_text=p["text"], rewritten_text=p["text"],
-                media_type=p.get("media_type", "photo"),
-                source_channel=src, source_msg_id=mid, source_views=0,
-                image_url=p.get("image_url"),
-            )
-            if cid:
-                saved += 1
+            try:
+                cid = save_channel_content(
+                    original_text=p["text"], rewritten_text=p["text"],
+                    media_type=p.get("media_type", "photo"),
+                    source_channel=src, source_msg_id=mid, source_views=0,
+                    image_url=p.get("image_url"),
+                )
+                if cid:
+                    saved += 1
+                else:
+                    save_errors.append(f"save_channel_content returned None (src={src}, mid={mid})")
+            except Exception as exc:
+                save_errors.append(f"{src}/{mid}: {exc}")
         diag["skipped_duplicates"] = skipped_dup
         diag["saved_to_db"] = saved
+        if save_errors:
+            diag["save_errors"] = save_errors
 
         # Phase 4: post if requested (flush pending queue regardless of new saves)
         if post:
