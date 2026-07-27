@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-07-27 | 중복 포럼 게시판 정리 + PostgreSQL 마이그레이션 완료
+
+### 💡 결정 사항
+- **중복 토픽 근본 원인**: 신규 PostgreSQL 구성 중 DB가 빈 상태일 때 `/debug/group-topic-test` 엔드포인트가 여러 번 호출되어 Telegram에 5세트×8토픽=40개 중복 생성
+- **삭제 방법**: Pyrogram raw API `DeleteTopicHistory(top_msg_id=tid)` → 메시지 삭제되면 토픽 자동 제거. `EditForumTopic(closed=True)` 는 이미 삭제된 토픽에 TOPIC_ID_INVALID 반환 (정상)
+- **DB 상태**: 이미 올바른 IDs(39-46)로 유지 중이었음 — 변경 불필요
+- **재발 방지**: `create_forum_topics()` 함수에 DB 기반 중복 체크(`existing_types`) 이미 구현됨. DB 정상 유지 시 중복 생성 없음
+
+### 🔧 변경 내용
+- Pyrogram raw API로 그룹 `-1004396746656` 내 중복 토픽 32개 삭제 (id 7-38)
+- 잔존 활성 토픽: 9개 (id=1 General + id=39~46 커스텀 8개)
+
+### 📋 다음 할 일
+- `SESSION_STRING_2+` 추가 확보 (generate_session.py)
+- DM 발송 워밍업 진행 (warmup.py 3~7일)
+- Railway에서 `SPORTS_LEAGUES` 환경변수 최신 리그로 업데이트
+
+### ⚠️ 주의사항
+- PostgreSQL: `sakura.proxy.rlwy.net:29236` (외부), `postgres.railway.internal:5432` (내부)
+- SESSION_STRING_1 만 활성 (고다 최, user_id=8996216378)
+- DM 발송 스케줄러 여전히 비활성 상태 (워밍업 완료 전까지 유지)
+
+---
+
 ## 2026-05-22 | 스포츠 콘텐츠 채널/그룹 게시 버그 수정 + Football-Data.org 폴백 완성
 
 ### 💡 결정 사항
@@ -301,3 +325,28 @@
 - DM 발송 Jitter 패턴 적용
 
 ---
+
+## 2026-07-27 | 전체 인프라 재구축 완료
+
+### 💡 결정 사항
+- 기존 텔레그램 계정 분실 → 새 계정(8996216378, 고다 최)으로 전체 재구축
+- 기존 PostgreSQL(yamabiko.proxy.rlwy.net:22926) 완전 삭제 확인 → 새 PostgreSQL 생성
+- DB 연결 방식: 풀(Pool) 방식 → 항상 fresh connection 방식으로 변경 (Railway proxy idle timeout 회피)
+- 새 PostgreSQL: Casino Nexus 프로젝트 내에 생성 (private network: postgres.railway.internal:5432)
+- TCP 프록시: sakura.proxy.rlwy.net:29236 (외부 접속용)
+
+### 🔧 변경 파일 목록
+- app/pg_broadcast.py: _get_conn() → always-fresh 연결, TCP keepalives 추가
+- app/main.py: run-sports-pipeline 진단 개선 (db_probe_start, elapsed timing)
+- scripts/setup_channel.py: 채널 자동 생성 스크립트
+- scripts/setup_group.py: 슈퍼그룹 자동 생성 스크립트
+
+### 📋 다음 할 일
+- [ ] 워밍업 3~7일 후 DM 캠페인 활성화 (SESSION_STRING_2+ 추가 필요)
+- [ ] 멤버 수집 확인 (00:00 UTC 스케줄러)
+- [ ] 스포츠 파이프라인 스케줄러 자동 실행 모니터링
+
+### ⚠️ 주의사항
+- SESSION_STRING_1 계정 워밍업 중 (DM 발송 스케줄 아직 비활성)
+- 새 DB는 빈 상태로 시작, campaign_posts 등 콘텐츠 추가 필요
+- DATABASE_URL이 private network URL로 변경됨 (Railway 내부에서만 접근 가능)

@@ -44,6 +44,7 @@
 - [x] **실시간 매치 스케줄러 시스템 구축** (match_schedule_db, match_scheduler, match_schedule_runner, 30분 job)
 - [x] **`get_pending_channel_content` source_prefix 파라미터** (큐 선점 버그 수정)
 - [x] **스포츠 콘텐츠 채널+그룹 게시 end-to-end 검증** (channel_posted=2, group_posted=2)
+- [x] **그룹 내 중복 포럼 게시판 정리** (32개 삭제, id 39-46 최종 유지)
 - [ ] **Railway 대시보드에서 `SPORTS_LEAGUES=1,292,98,253,71` 업데이트** (현재 구형 유럽 리그로 설정됨)
 - [ ] **Railway account-level 토큰 발급** (Account Settings → Tokens) — CLI 자동화용
 - [ ] `.playwright-mcp/` 정리 (gitignore 또는 커밋 결정)
