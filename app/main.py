@@ -734,10 +734,21 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
     if not _check_debug_auth(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
+    import time as _time
     diag: dict = {
         "football_data_key_set": bool(settings.football_data_api_key),
         "odds_api_key_set": bool(settings.odds_api_key),
     }
+    # DB connectivity probe at request start (before any long operations)
+    try:
+        from app.pg_broadcast import _get_conn
+        with _get_conn() as _c:
+            _c.cursor().execute("SELECT 1")
+        diag["db_probe_start"] = "ok"
+    except Exception as _e:
+        diag["db_probe_start"] = f"FAILED: {_e}"
+    _t0 = _time.monotonic()
+
     try:
         # Phase 1: collect — use fast sleep (1s) for debug to avoid HTTP timeout
         from app.sports_scraper import collect_sports_data
@@ -832,9 +843,9 @@ async def debug_run_sports_pipeline(request: Request, post: bool = False):
                     _cur.execute("DELETE FROM channel_content WHERE id = %s", (_test_id[0],))
                 _conn.commit()
                 _cur.close()
-                diag["db_insert_test"] = "ok"
+                diag["db_insert_test"] = f"ok (elapsed={_time.monotonic()-_t0:.1f}s)"
         except Exception as _db_exc:
-            diag["db_insert_test"] = f"FAILED: {_db_exc}"
+            diag["db_insert_test"] = f"FAILED after {_time.monotonic()-_t0:.1f}s: {_db_exc}"
 
         saved = 0
         skipped_dup = 0
