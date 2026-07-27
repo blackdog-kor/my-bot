@@ -19,6 +19,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 _pool: pg_pool.ThreadedConnectionPool | None = None
 
 
+_CONNECT_KWARGS: dict = {
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 5,
+}
+
+
 def _init_pool() -> None:
     """ThreadedConnectionPool 초기화. 앱 시작 시 1회 호출."""
     global _pool
@@ -31,6 +39,7 @@ def _init_pool() -> None:
             minconn=settings.db_pool_min_conn,
             maxconn=settings.db_pool_max_conn,
             dsn=DATABASE_URL,
+            **_CONNECT_KWARGS,
         )
         logger.info(
             "DB connection pool initialized (min=%d, max=%d)",
@@ -42,11 +51,38 @@ def _init_pool() -> None:
         _pool = None
 
 
+def _is_conn_alive(conn) -> bool:
+    """Quick liveness check — returns False if connection is dead/closed."""
+    if conn.closed:
+        return False
+    try:
+        conn.cursor().execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
 @contextmanager
 def _get_conn():
-    """Connection context manager — pool 사용, pool 미초기화 시 직접 연결 fallback."""
+    """Connection context manager — pool 사용, stale 감지 시 fresh 연결 fallback."""
     if _pool and not _pool.closed:
         conn = _pool.getconn()
+        # If the pooled connection is stale, discard and open a fresh one
+        if not _is_conn_alive(conn):
+            logger.warning("Stale pooled connection detected — using fresh connection")
+            try:
+                _pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            conn = psycopg2.connect(DATABASE_URL, **_CONNECT_KWARGS)
+            try:
+                yield conn
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+            return
         try:
             yield conn
         except Exception:
@@ -55,7 +91,7 @@ def _get_conn():
         finally:
             _pool.putconn(conn)
     else:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL, **_CONNECT_KWARGS)
         try:
             yield conn
         except Exception:
